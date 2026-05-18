@@ -1,0 +1,14 @@
+[project]
+name = "roads-rdb"
+version = "0.1.0"
+description = "Experimental OS Open Roads routing-kernel binary builder and evaluator"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+roads-rdb = "roads_rdb.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
