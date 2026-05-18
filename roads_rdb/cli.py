@@ -7,7 +7,7 @@ import statistics
 import time
 from pathlib import Path
 
-from .graph import build_graph_from_gpkg, parse_bbox, parse_point, route_nodes
+from .graph import QueryWorkspace, build_graph_from_gpkg, parse_bbox, parse_point, route_nodes
 from .lookup import write_lookup_db
 from .rdb import read_rdb, write_rdb
 
@@ -109,6 +109,8 @@ def _inspect(args: argparse.Namespace) -> int:
         "directed_edges": graph.edge_count,
         "snap_geometries": _snap_geometry_count(graph),
         "snap_tiles": _snap_tile_count(graph),
+        "components": getattr(graph, "component_count", None) if getattr(graph, "has_components", False) else None,
+        "component_index": getattr(graph, "has_components", False),
         "origin_x_m": graph.origin_x_m,
         "origin_y_m": graph.origin_y_m,
         "coord_scale": graph.coord_scale,
@@ -123,6 +125,7 @@ def _bench(args: argparse.Namespace) -> int:
     graph = read_rdb(args.index)
     rng = random.Random(args.seed)
     bounds = graph.bounds() if args.sample == "bbox" else None
+    workspace = QueryWorkspace(graph.node_count)
     timings_ms: list[float] = []
     successes = 0
     failures = 0
@@ -138,7 +141,7 @@ def _bench(args: argparse.Namespace) -> int:
             target = (rng.uniform(bounds[0], bounds[2]), rng.uniform(bounds[1], bounds[3]))
         started = time.perf_counter()
         try:
-            route_nodes(graph, origin, target)
+            route_nodes(graph, origin, target, workspace=workspace)
         except ValueError:
             failures += 1
             continue

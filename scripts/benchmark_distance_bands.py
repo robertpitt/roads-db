@@ -15,8 +15,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from roads_rdb.graph import route_nodes
+from roads_rdb.graph import QueryWorkspace, route_nodes
 from roads_rdb.rdb import read_rdb
+
+
+DEFAULT_PAIRS_PER_BAND = 100
+DEFAULT_PROGRESS_EVERY = 25
 
 
 @dataclass(slots=True)
@@ -45,7 +49,12 @@ def main() -> int:
     )
     parser.add_argument("--index", default="build/full_gb.rdb")
     parser.add_argument("--distances-km", default="10,50,100,200")
-    parser.add_argument("--pairs", type=int, default=3, help="successful routed pairs per distance band")
+    parser.add_argument(
+        "--pairs",
+        type=int,
+        default=DEFAULT_PAIRS_PER_BAND,
+        help="successful routed pairs per distance band",
+    )
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--cell-size-m", type=float, default=5000.0)
     parser.add_argument("--tolerance-ratio", type=float, default=0.10)
@@ -53,6 +62,12 @@ def main() -> int:
     parser.add_argument("--max-sample-attempts", type=int, default=50000)
     parser.add_argument("--snap-radius-m", type=float, default=50.0)
     parser.add_argument("--snap-candidates", type=int, default=8)
+    parser.add_argument(
+        "--progress-every",
+        type=int,
+        default=DEFAULT_PROGRESS_EVERY,
+        help="print progress to stderr after this many successful routes per band; use 0 to disable",
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
@@ -64,6 +79,7 @@ def main() -> int:
     try:
         started_index = time.perf_counter()
         node_index = build_node_index(graph, args.cell_size_m)
+        workspace = QueryWorkspace(graph.node_count)
         index_s = time.perf_counter() - started_index
         load_s = started_index - started_load
 
@@ -79,6 +95,8 @@ def main() -> int:
                 max_sample_attempts=args.max_sample_attempts,
                 snap_radius_m=args.snap_radius_m,
                 snap_candidates=args.snap_candidates,
+                progress_every=args.progress_every,
+                workspace=workspace,
             )
             bands.append(band)
     finally:
@@ -106,6 +124,7 @@ def main() -> int:
                 f"sample attempts {band['sample_attempts']}, "
                 f"median {band['route_ms']['median']} ms, "
                 f"p95 {band['route_ms']['p95']} ms, "
+                f"p99 {band['route_ms']['p99']} ms, "
                 f"median nodes {band['nodes']['median']}, "
                 f"median route/LOS {band['route_to_los_ratio']['median']}"
             )
@@ -137,6 +156,8 @@ def run_band(
     max_sample_attempts: int,
     snap_radius_m: float,
     snap_candidates: int,
+    progress_every: int,
+    workspace: QueryWorkspace,
 ) -> dict:
     route_times: list[float] = []
     node_counts: list[int] = []
@@ -146,6 +167,8 @@ def run_band(
     ratios: list[float] = []
     failures = 0
     sample_attempts = 0
+    started_band = time.perf_counter()
+    last_progress_successes = 0
 
     while len(route_times) < requested_pairs and sample_attempts < max_sample_attempts:
         sample_attempts += 1
@@ -161,6 +184,7 @@ def run_band(
                 pair.target,
                 snap_radius_m=snap_radius_m,
                 snap_candidates=snap_candidates,
+                workspace=workspace,
             )
         except ValueError:
             failures += 1
@@ -172,6 +196,16 @@ def run_band(
         costs_m.append(route.cost_m)
         los_values.append(pair.los_m)
         ratios.append(route.cost_m / pair.los_m if pair.los_m else math.nan)
+        if progress_every > 0 and len(route_times) - last_progress_successes >= progress_every:
+            last_progress_successes = len(route_times)
+            elapsed_s = time.perf_counter() - started_band
+            print(
+                f"{distance_m / 1000:g} km: {len(route_times)}/{requested_pairs} routes "
+                f"in {elapsed_s:.1f}s",
+                file=sys.stderr,
+            )
+
+    elapsed_s = time.perf_counter() - started_band
 
     return {
         "target_km": distance_m / 1000,
@@ -180,6 +214,8 @@ def run_band(
         "successes": len(route_times),
         "route_failures": failures,
         "sample_attempts": sample_attempts,
+        "elapsed_s": round(elapsed_s, 3),
+        "success_rate": round(len(route_times) / sample_attempts, 4) if sample_attempts else None,
         "line_of_sight_m": summarise(los_values),
         "route_cost_m": summarise(costs_m),
         "route_to_los_ratio": summarise(ratios),
@@ -231,12 +267,31 @@ def sample_pair(
 
 def summarise(values: list[float] | list[int]) -> dict[str, float | int | None]:
     if not values:
-        return {"min": None, "median": None, "p95": None, "max": None}
+        return {
+            "count": 0,
+            "min": None,
+            "mean": None,
+            "stdev": None,
+            "p25": None,
+            "median": None,
+            "p75": None,
+            "p90": None,
+            "p95": None,
+            "p99": None,
+            "max": None,
+        }
     sorted_values = sorted(values)
     return {
+        "count": len(sorted_values),
         "min": round(sorted_values[0], 3),
+        "mean": round(statistics.fmean(sorted_values), 3),
+        "stdev": round(statistics.stdev(sorted_values), 3) if len(sorted_values) > 1 else 0.0,
+        "p25": round(percentile(sorted_values, 0.25), 3),
         "median": round(statistics.median(sorted_values), 3),
+        "p75": round(percentile(sorted_values, 0.75), 3),
+        "p90": round(percentile(sorted_values, 0.90), 3),
         "p95": round(percentile(sorted_values, 0.95), 3),
+        "p99": round(percentile(sorted_values, 0.99), 3),
         "max": round(sorted_values[-1], 3),
     }
 

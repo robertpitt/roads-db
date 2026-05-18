@@ -73,13 +73,15 @@ snap_geom_offsets
 snap_geom_points
 snap_tiles
 snap_tile_geoms
+components
+component_metadata
 ```
 
 Header:
 
 ```text
 magic:          RDB1
-format_version: 1
+format_version: 2 for new builds; v1 files are still readable
 section_count:  u32
 ```
 
@@ -102,6 +104,9 @@ snap geom record:  start_node:u32, end_node:u32, forward_edge:u32, reverse_edge:
 snap geom point:   x_units:u32, y_units:u32
 snap tile:         tile_x:u32, tile_y:u32, first_geom:u32, geom_count:u32
 snap tile geom:    geom_id:u32
+component:         component_id:u32
+component meta:    node_count:u32, edge_count:u32,
+                   min_x_units:u32, min_y_units:u32, max_x_units:u32, max_y_units:u32
 ```
 
 Coordinates are EPSG:27700 British National Grid metres. Packed node and snap
@@ -191,8 +196,8 @@ Query flow:
 2. Use snap tile index to find nearby road geometries.
 3. Compute point-to-polyline distance for snap candidates.
 4. Convert snap candidates to graph endpoint costs.
-5. Run multi-source Dijkstra over directed edges.
-6. Stop when a target candidate endpoint is finalized.
+5. Reject if no origin/target endpoint pair shares a connected component.
+6. Run A* over directed edges using BNG Euclidean distance as the heuristic.
 7. Reconstruct ordered node IDs and optional edge IDs.
 ```
 
@@ -205,15 +210,17 @@ cost_m:   distance cost in metres
 origin_snap / target_snap metadata
 ```
 
-The current Dijkstra state uses compact arrays:
+The current query workspace uses compact arrays:
 
 ```text
 dist:      array("d")
 prev_node: array("i")
 prev_edge: array("i")
+touched node lists for reset
 ```
 
-This reduced full-query RSS substantially compared with Python lists.
+Callers can reuse `QueryWorkspace` across requests to avoid repeated full-graph
+allocation.
 
 ## Direction Evaluation
 
@@ -286,11 +293,26 @@ Distance-band benchmark command:
 python3 scripts/benchmark_distance_bands.py \
   --index build/full_gb.rdb \
   --distances-km 10,50,100,200 \
-  --pairs 2 \
+  --pairs 100 \
   --json
 ```
 
-Latest sampled results:
+Latest 100-sample A* results from `build/full_gb_v2.rdb`:
+
+```text
+10 km:   median 5.486 ms,    p95 24.057 ms,   p99 35.289 ms
+50 km:   median 87.371 ms,   p95 249.468 ms,  p99 311.915 ms
+100 km:  median 231.270 ms,  p95 718.419 ms,  p99 912.859 ms
+200 km:  median 1015.472 ms, p95 1717.561 ms, p99 2202.563 ms
+```
+
+Full JSON result:
+
+```text
+build/benchmarks/full_gb_v2_astar_100pairs.json
+```
+
+Earlier raw-Dijkstra sampled results:
 
 ```text
 RDB load:            0.0066s
@@ -316,8 +338,8 @@ No one-way restrictions.
 No turn restrictions.
 No traffic/speed profile yet.
 No road access restrictions.
-No component index in the RDB yet.
-No A* heuristic yet.
+Existing `build/full_gb.rdb` may still be a v1 file without component/reverse
+adjacency sections until rebuilt.
 No corridor compression yet.
 No cell overlays or shortcut hierarchy yet.
 ```
@@ -337,37 +359,48 @@ Implementation limitations:
 Full build still peaks around 7.7 GB RSS.
 Snap geometries are stored as fixed u32 point pairs, not delta/varint encoded.
 Snap tile IDs are sparse records, searched by binary search.
-Route query still allocates full-graph Dijkstra arrays per query.
-No reusable query workspace/pool yet.
-No bidirectional Dijkstra.
+One-off route queries allocate full-graph workspace unless callers pass a
+reusable `QueryWorkspace`.
 No mmap-backed priority queue or native extension.
 ```
+
+## Current Search Layer
+
+New builds write component IDs and component metadata. Route queries use one
+search algorithm:
+
+```text
+astar
+```
+
+A* is the default and only runtime search path. Raw Dijkstra and bidirectional
+Dijkstra were removed after benchmarking showed A* was the best current
+pure-Python path.
 
 ## Recommended Next Steps
 
 High-value next steps:
 
 ```text
-1. Add connected component IDs to RDB and reject impossible routes before search.
-2. Add A* with Euclidean lower-bound heuristic.
-3. Add bidirectional Dijkstra/A* for long routes.
-4. Add corridor compression for degree-2 chains.
-5. Add shortcut unpacking so route output still returns original node IDs.
-6. Add 1 km / 5 km / 25 km cell overlays.
+1. Rebuild `build/full_gb.rdb` so the full artifact has lean v2 component sections.
+2. Re-benchmark A* across 10/50/100/200 km bands.
+3. Add corridor compression for degree-2 chains.
+4. Add shortcut unpacking so route output still returns original node IDs.
+5. Add 1 km / 5 km / 25 km cell overlays if benchmarks still justify hierarchy.
+6. Optimize snap geometry and snap tile construction memory.
 7. Replace the benchmark node sampler with an mmap/grid-backed sampler to reduce RSS.
 8. Build the full companion lookup DB or a compact link metadata binary.
 9. Split snap geometry from route geometry and test geometry simplification.
 10. Validate WGS84->BNG conversion against `pyproj` when available.
 ```
 
-For the immediate next iteration, the best target is probably:
+The immediate next iteration should be:
 
 ```text
-A* + connected components + bidirectional search
+full v2 rebuild + distance-band benchmark comparison
 ```
 
-This should improve long routes without changing the file format as much as
-cell overlays or contraction-style shortcuts.
+That will show whether corridor compression or hierarchy is justified.
 
 ## Design Direction
 
@@ -386,4 +419,3 @@ edge ID / source link ID -> road names, numbers, display geometry, directions te
 The RDB should remain sectioned and mmap-friendly. Avoid adding string metadata,
 source UUIDs, or verbose geometry to the hot routing file unless benchmarks show
 it is necessary.
-

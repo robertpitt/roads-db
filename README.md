@@ -32,6 +32,8 @@ python3 -m roads_rdb query \
   --with-edges
 ```
 
+Routing uses A* with a British National Grid Euclidean lower-bound heuristic.
+
 ## Benchmark
 
 ```bash
@@ -47,12 +49,14 @@ Distance-band benchmark using only the RDB file:
 python3 scripts/benchmark_distance_bands.py \
   --index build/full_gb.rdb \
   --distances-km 10,50,100,200 \
-  --pairs 2
+  --pairs 100 \
+  --json
 ```
 
 This builds an in-memory node-coordinate sampler from the RDB, picks random
 node-coordinate pairs at each straight-line distance band, runs `route_nodes`,
-and reports route timing/path stats. It does not query the source GeoPackage.
+and reports route timing/path stats including mean, median, p90, p95, and p99.
+It does not query the source GeoPackage.
 
 ## Build The Full GB Routing Binary
 
@@ -78,7 +82,9 @@ inspect peak RSS:  ~14 MB
 ```
 
 The raw Dijkstra query still allocates per-query distance/predecessor arrays;
-that is separate from file loading and is the next target for hierarchy work.
+server-style callers can now reuse a `QueryWorkspace` to avoid repeated
+full-graph allocation. New builds also include connected-component IDs and
+reverse adjacency sections used by `auto` routing.
 
 ## Evaluate Directions
 
@@ -107,7 +113,9 @@ dense node and directed-edge graph construction
 fixed tile snap index
 single-file RDB writer/reader
 memory-mapped section reader
-route-node query using Dijkstra
+route-node query using A*
+connected-component route rejection
+reusable query workspace
 companion SQLite lookup database
 unit tests and real-data smoke benchmarks
 ```
@@ -121,3 +129,6 @@ shortcut unpack layers
 lon/lat to BNG conversion
 turn restrictions or navigation instructions
 ```
+
+Existing RDB v1 files remain readable, but they do not contain component or
+reverse-adjacency sections. Rebuild the RDB to enable those runtime paths.
