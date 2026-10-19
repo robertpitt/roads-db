@@ -1,5 +1,9 @@
 ## Project idea: **Open Roads Fast Lookup Pyramid**
 
+Historical design proposal, including future work. The v0.1.0 implementation
+uses A* over an RDB format-1 graph; overlays and corridor compression are not
+implemented. See `README.md` and `SPEC.md` for the release's supported scope.
+
 Build a small routing-index project that takes an OS Open Roads `.gpkg` file and produces a derived, pre-calculated, multi-layer dataset for very fast network-distance lookup.
 
 The spirit is exactly the transcript’s idea: do the expensive work before the user asks, store shortcuts / layers, then make each lookup touch only a small part of the graph rather than the whole road network. The transcript describes this as pre-processing, shortcut construction, optional reweighting, and tiny live searches instead of brute-force Dijkstra over the full graph. 

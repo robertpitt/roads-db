@@ -3,40 +3,46 @@ from __future__ import annotations
 import json
 import math
 import mmap
-import os
 import struct
+from bisect import bisect_right
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Iterable, Mapping
 
 from .gpkg import Point
-from .graph import RoadGraph, SnapCandidate, SnapGeometry, _snap_endpoint_costs
+from .graph import RoadGraph, SnapCandidate, SnapGeometry, _snap_endpoint_costs, _snap_endpoint_costs_units
 
 
 MAGIC = b"RDB1"
-FORMAT_VERSION = 2
-SUPPORTED_FORMAT_VERSIONS = {1, 2}
+FORMAT_VERSION = 1
 UINT32_NONE = 0xFFFFFFFF
+SECTION_ALIGNMENT = 64
 
 _HEADER = struct.Struct("<4sII")
 _SECTION = struct.Struct("<32sQQ")
 _U32 = struct.Struct("<I")
 _NODE = struct.Struct("<II")
-_EDGE = struct.Struct("<IIIIII")
 _GEOM = struct.Struct("<IIIIII")
+_BBOX = struct.Struct("<IIII")
 _TILE = struct.Struct("<IIII")
 _COMPONENT_META = struct.Struct("<IIIIII")
 
 _REQUIRED_SECTIONS = {
     "metadata",
-    "nodes",
-    "edges",
+    "node_x",
+    "node_y",
+    "edge_to",
+    "edge_length",
+    "edge_geom",
     "offsets",
     "snap_geom_records",
+    "snap_geom_bboxes",
     "snap_geom_offsets",
     "snap_geom_points",
     "snap_tiles",
     "snap_tile_geoms",
+    "components",
+    "component_metadata",
 }
 
 
@@ -71,8 +77,28 @@ class MmapRoadGraph:
         self._edge_count = int(metadata["directed_edge_count"])
         self._snap_geometry_count = int(metadata["snap_geometry_count"])
         self._snap_tile_count = int(metadata["snap_tile_count"])
-        self._component_count = int(metadata.get("component_count", 1 if self._node_count else 0))
+        self._snap_geom_point_count = int(metadata["snap_geom_point_count"])
+        self._snap_tile_geom_count = int(metadata["snap_tile_geom_count"])
+        self._component_count = int(metadata["component_count"])
+        self._section_u32_views: dict[str, memoryview] = {}
         self._validate()
+        self._node_x_u32 = self._u32_view("node_x")
+        self._node_y_u32 = self._u32_view("node_y")
+        self._edge_to_u32 = self._u32_view("edge_to")
+        self._edge_length_u32 = self._u32_view("edge_length")
+        self._edge_geom_u32 = self._u32_view("edge_geom")
+        self._offsets_u32 = self._u32_view("offsets")
+        self._snap_geom_records_u32 = self._u32_view("snap_geom_records")
+        self._snap_geom_bboxes_u32 = self._u32_view("snap_geom_bboxes")
+        self._snap_geom_offsets_u32 = self._u32_view("snap_geom_offsets")
+        self._snap_geom_points_u32 = self._u32_view("snap_geom_points")
+        self._snap_tiles_u32 = self._u32_view("snap_tiles")
+        self._snap_tile_geoms_u32 = self._u32_view("snap_tile_geoms")
+        self._components_u32 = self._u32_view("components")
+        self._edge_reverse_u32 = self._u32_view("edge_reverse") if "edge_reverse" in self.sections else None
+        self._edge_source_links_u32 = (
+            self._u32_view("edge_source_links") if "edge_source_links" in self.sections else None
+        )
 
     @property
     def node_count(self) -> int:
@@ -96,9 +122,12 @@ class MmapRoadGraph:
 
     @property
     def has_components(self) -> bool:
-        return "components" in self.sections
+        return True
 
     def close(self) -> None:
+        for view in self._section_u32_views.values():
+            view.release()
+        self._section_u32_views.clear()
         self._mmap.close()
         self._fp.close()
 
@@ -110,33 +139,43 @@ class MmapRoadGraph:
         return self._node_record(node_id)
 
     def outgoing_edges(self, node_id: int) -> range:
-        start = self._u32("offsets", node_id)
-        end = self._u32("offsets", node_id + 1)
+        start = self._offsets_u32[node_id]
+        end = self._offsets_u32[node_id + 1]
         return range(start, end)
 
     def edge_target_and_length_m(self, edge_id: int) -> tuple[int, float]:
-        _from_node, to_node, length, _reverse, _geom_id, _source_link = self._edge_record(edge_id)
-        return to_node, length / self.length_scale
+        return self._edge_to_u32[edge_id], self._edge_length_u32[edge_id] / self.length_scale
+
+    def edge_target_and_length_units(self, edge_id: int) -> tuple[int, int]:
+        return self._edge_to_u32[edge_id], self._edge_length_u32[edge_id]
 
     def edge_geom_id(self, edge_id: int) -> int:
-        _from_node, _to_node, _length, _reverse, geom_id, _source_link = self._edge_record(edge_id)
-        return geom_id
+        return self._edge_geom_u32[edge_id]
+
+    def edge_reverse_id(self, edge_id: int) -> int:
+        if self._edge_reverse_u32 is not None:
+            return self._edge_reverse_u32[edge_id]
+        return UINT32_NONE
+
+    def edge_source_link_id(self, edge_id: int) -> int:
+        if self._edge_source_links_u32 is not None:
+            return self._edge_source_links_u32[edge_id]
+        return UINT32_NONE
 
     def component_id(self, node_id: int) -> int:
-        if "components" not in self.sections:
-            return 0
-        return self._u32("components", node_id)
+        return self._components_u32[node_id]
 
     def tile_geom_ids(self, tile_x: int, tile_y: int) -> Iterable[int]:
         record = self._find_tile(tile_x, tile_y)
         if record is None:
             return ()
         _tx, _ty, first, count = record
-        return (self._u32("snap_tile_geoms", idx) for idx in range(first, first + count))
+        tile_geoms = self._snap_tile_geoms_u32
+        return (tile_geoms[idx] for idx in range(first, first + count))
 
     def snap_distance(self, geom_id: int, x: float, y: float) -> tuple[float, float, float, float]:
-        start = self._u32("snap_geom_offsets", geom_id)
-        end = self._u32("snap_geom_offsets", geom_id + 1)
+        start = self._snap_geom_offsets_u32[geom_id]
+        end = self._snap_geom_offsets_u32[geom_id + 1]
         if end <= start:
             raise ValueError(f"snap geometry {geom_id} has no points")
 
@@ -171,9 +210,36 @@ class MmapRoadGraph:
 
         return math.sqrt(best_dist_sq), best_along, best_x, best_y
 
+    def snap_geom_may_intersect_radius(self, geom_id: int, x: float, y: float, radius_m: float) -> bool:
+        bboxes = self._snap_geom_bboxes_u32
+        bbox_base = geom_id * 4
+        min_x = bboxes[bbox_base]
+        min_y = bboxes[bbox_base + 1]
+        max_x = bboxes[bbox_base + 2]
+        max_y = bboxes[bbox_base + 3]
+        x_units = (x - self.origin_x_m) * self.coord_scale
+        y_units = (y - self.origin_y_m) * self.coord_scale
+        radius_units = radius_m * self.coord_scale
+        return not (
+            x_units < min_x - radius_units
+            or x_units > max_x + radius_units
+            or y_units < min_y - radius_units
+            or y_units > max_y + radius_units
+        )
+
     def snap_endpoint_costs(self, geom_id: int, snap: SnapCandidate) -> tuple[tuple[int, float], ...]:
-        start_node, end_node, _forward, _reverse, length_units, _point_count = self._geom_record(geom_id)
+        geom_base = geom_id * 6
+        start_node = self._snap_geom_records_u32[geom_base]
+        end_node = self._snap_geom_records_u32[geom_base + 1]
+        length_units = self._snap_geom_records_u32[geom_base + 4]
         return _snap_endpoint_costs(start_node, end_node, length_units / self.length_scale, snap)
+
+    def snap_endpoint_cost_units(self, geom_id: int, snap: SnapCandidate) -> tuple[tuple[int, int], ...]:
+        geom_base = geom_id * 6
+        start_node = self._snap_geom_records_u32[geom_base]
+        end_node = self._snap_geom_records_u32[geom_base + 1]
+        length_units = self._snap_geom_records_u32[geom_base + 4]
+        return _snap_endpoint_costs_units(start_node, end_node, length_units, self.length_scale, snap)
 
     def bounds(self) -> tuple[float, float, float, float]:
         min_x = min_y = float("inf")
@@ -189,38 +255,69 @@ class MmapRoadGraph:
     def _node_record(self, node_id: int) -> tuple[int, int]:
         if node_id < 0 or node_id >= self.node_count:
             raise IndexError(node_id)
-        return _NODE.unpack_from(self._mmap, self.sections["nodes"].offset + node_id * _NODE.size)
+        return self._node_x_u32[node_id], self._node_y_u32[node_id]
 
     def _edge_record(self, edge_id: int) -> tuple[int, int, int, int, int, int]:
         if edge_id < 0 or edge_id >= self.edge_count:
             raise IndexError(edge_id)
-        return _EDGE.unpack_from(self._mmap, self.sections["edges"].offset + edge_id * _EDGE.size)
+        return (
+            self._edge_from_node(edge_id),
+            self._edge_to_u32[edge_id],
+            self._edge_length_u32[edge_id],
+            self.edge_reverse_id(edge_id),
+            self._edge_geom_u32[edge_id],
+            self.edge_source_link_id(edge_id),
+        )
+
+    def _edge_from_node(self, edge_id: int) -> int:
+        if edge_id < 0 or edge_id >= self.edge_count:
+            raise IndexError(edge_id)
+        return bisect_right(self._offsets_u32, edge_id) - 1
 
     def _geom_record(self, geom_id: int) -> tuple[int, int, int, int, int, int]:
         if geom_id < 0 or geom_id >= self.snap_geometry_count:
             raise IndexError(geom_id)
-        return _GEOM.unpack_from(
-            self._mmap,
-            self.sections["snap_geom_records"].offset + geom_id * _GEOM.size,
+        geom_base = geom_id * 6
+        geoms = self._snap_geom_records_u32
+        return (
+            geoms[geom_base],
+            geoms[geom_base + 1],
+            geoms[geom_base + 2],
+            geoms[geom_base + 3],
+            geoms[geom_base + 4],
+            geoms[geom_base + 5],
         )
 
     def _tile_record(self, tile_idx: int) -> tuple[int, int, int, int]:
-        return _TILE.unpack_from(self._mmap, self.sections["snap_tiles"].offset + tile_idx * _TILE.size)
+        tile_base = tile_idx * 4
+        tiles = self._snap_tiles_u32
+        return tiles[tile_base], tiles[tile_base + 1], tiles[tile_base + 2], tiles[tile_base + 3]
 
     def _snap_points(self, geom_id: int) -> Iterable[Point]:
-        start = self._u32("snap_geom_offsets", geom_id)
-        end = self._u32("snap_geom_offsets", geom_id + 1)
+        start = self._snap_geom_offsets_u32[geom_id]
+        end = self._snap_geom_offsets_u32[geom_id + 1]
         point_base = self.sections["snap_geom_points"].offset
         for point_idx in range(start, end):
             x, y = self._snap_point_xy(point_base, point_idx)
             yield Point(x, y)
 
-    def _snap_point_xy(self, point_base: int, point_idx: int) -> tuple[float, float]:
-        x, y = _NODE.unpack_from(self._mmap, point_base + point_idx * _NODE.size)
+    def _snap_point_xy(self, _point_base: int, point_idx: int) -> tuple[float, float]:
+        point_offset = point_idx * 2
+        x = self._snap_geom_points_u32[point_offset]
+        y = self._snap_geom_points_u32[point_offset + 1]
         return self.origin_x_m + x / self.coord_scale, self.origin_y_m + y / self.coord_scale
 
     def _u32(self, section_name: str, index: int) -> int:
-        return _U32.unpack_from(self._mmap, self.sections[section_name].offset + index * _U32.size)[0]
+        return self._u32_view(section_name)[index]
+
+    def _u32_view(self, section_name: str) -> memoryview:
+        view = self._section_u32_views.get(section_name)
+        if view is not None:
+            return view
+        section = self.sections[section_name]
+        view = memoryview(self._mmap)[section.offset : section.offset + section.size].cast("I")
+        self._section_u32_views[section_name] = view
+        return view
 
     def _find_tile(self, tile_x: int, tile_y: int) -> tuple[int, int, int, int] | None:
         lo = 0
@@ -238,19 +335,33 @@ class MmapRoadGraph:
         return None
 
     def _validate(self) -> None:
-        _expect_section_size(self.sections["nodes"], self.node_count, _NODE.size)
-        _expect_section_size(self.sections["edges"], self.edge_count, _EDGE.size)
+        _expect_section_size(self.sections["node_x"], self.node_count, _U32.size)
+        _expect_section_size(self.sections["node_y"], self.node_count, _U32.size)
+        _expect_section_size(self.sections["edge_to"], self.edge_count, _U32.size)
+        _expect_section_size(self.sections["edge_length"], self.edge_count, _U32.size)
+        _expect_section_size(self.sections["edge_geom"], self.edge_count, _U32.size)
         _expect_section_size(self.sections["offsets"], self.node_count + 1, _U32.size)
         _expect_section_size(self.sections["snap_geom_records"], self.snap_geometry_count, _GEOM.size)
+        _expect_section_size(self.sections["snap_geom_bboxes"], self.snap_geometry_count, _BBOX.size)
         _expect_section_size(self.sections["snap_geom_offsets"], self.snap_geometry_count + 1, _U32.size)
+        _expect_section_size(self.sections["snap_geom_points"], self._snap_geom_point_count, _NODE.size)
         _expect_section_size(self.sections["snap_tiles"], self.snap_tile_count, _TILE.size)
-        if "components" in self.sections:
-            _expect_section_size(self.sections["components"], self.node_count, _U32.size)
-        if "component_metadata" in self.sections:
-            _expect_section_size(self.sections["component_metadata"], self.component_count, _COMPONENT_META.size)
+        _expect_section_size(self.sections["snap_tile_geoms"], self._snap_tile_geom_count, _U32.size)
+        _expect_section_size(self.sections["components"], self.node_count, _U32.size)
+        _expect_section_size(self.sections["component_metadata"], self.component_count, _COMPONENT_META.size)
+        if "edge_reverse" in self.sections:
+            _expect_section_size(self.sections["edge_reverse"], self.edge_count, _U32.size)
+        if "edge_source_links" in self.sections:
+            _expect_section_size(self.sections["edge_source_links"], self.edge_count, _U32.size)
 
 
-def write_rdb(path: str | Path, graph: RoadGraph) -> None:
+def write_rdb(
+    path: str | Path,
+    graph: RoadGraph,
+    *,
+    include_edge_reverse: bool = False,
+    include_edge_source_links: bool = False,
+) -> None:
     """Write the concrete MVP routing-kernel binary with streamed sections."""
 
     geom_point_count = sum(len(geom.points) for geom in graph.snap_geometries)
@@ -274,10 +385,14 @@ def write_rdb(path: str | Path, graph: RoadGraph) -> None:
 
     sizes = {
         "metadata": len(metadata_bytes),
-        "nodes": graph.node_count * _NODE.size,
-        "edges": graph.edge_count * _EDGE.size,
+        "node_x": graph.node_count * _U32.size,
+        "node_y": graph.node_count * _U32.size,
+        "edge_to": graph.edge_count * _U32.size,
+        "edge_length": graph.edge_count * _U32.size,
+        "edge_geom": graph.edge_count * _U32.size,
         "offsets": len(graph.offsets) * _U32.size,
         "snap_geom_records": len(graph.snap_geometries) * _GEOM.size,
+        "snap_geom_bboxes": len(graph.snap_geometries) * _BBOX.size,
         "snap_geom_offsets": (len(graph.snap_geometries) + 1) * _U32.size,
         "snap_geom_points": geom_point_count * _NODE.size,
         "snap_tiles": len(graph.snap_tiles) * _TILE.size,
@@ -285,12 +400,17 @@ def write_rdb(path: str | Path, graph: RoadGraph) -> None:
         "components": len(graph.component_ids) * _U32.size,
         "component_metadata": len(graph.component_node_counts) * _COMPONENT_META.size,
     }
+    if include_edge_reverse:
+        sizes["edge_reverse"] = graph.edge_count * _U32.size
+    if include_edge_source_links:
+        sizes["edge_source_links"] = graph.edge_count * _U32.size
 
     names = list(sizes)
     directory_size = len(names) * _SECTION.size
-    cursor = _HEADER.size + directory_size
+    cursor = _align(_HEADER.size + directory_size)
     directory: list[tuple[str, int, int]] = []
     for name in names:
+        cursor = _align(cursor)
         directory.append((name, cursor, sizes[name]))
         cursor += sizes[name]
 
@@ -303,18 +423,25 @@ def write_rdb(path: str | Path, graph: RoadGraph) -> None:
 
         writers: dict[str, Callable[[BinaryIO], None]] = {
             "metadata": lambda f: f.write(metadata_bytes),
-            "nodes": lambda f: _write_nodes(f, graph),
-            "edges": lambda f: _write_edges(f, graph),
+            "node_x": lambda f: _write_u32_iter(f, graph.node_x),
+            "node_y": lambda f: _write_u32_iter(f, graph.node_y),
+            "edge_to": lambda f: _write_u32_iter(f, graph.edge_to),
+            "edge_length": lambda f: _write_u32_iter(f, graph.edge_length),
+            "edge_geom": lambda f: _write_u32_iter(f, graph.edge_geom),
             "offsets": lambda f: _write_u32_iter(f, graph.offsets),
             "snap_geom_records": lambda f: _write_snap_geom_records(f, graph),
+            "snap_geom_bboxes": lambda f: _write_snap_geom_bboxes(f, graph),
             "snap_geom_offsets": lambda f: _write_snap_geom_offsets(f, graph),
             "snap_geom_points": lambda f: _write_snap_geom_points(f, graph),
             "snap_tiles": lambda f: _write_snap_tiles(f, graph),
             "snap_tile_geoms": lambda f: _write_snap_tile_geoms(f, graph),
             "components": lambda f: _write_u32_iter(f, graph.component_ids),
             "component_metadata": lambda f: _write_component_metadata(f, graph),
+            "edge_reverse": lambda f: _write_u32_iter(f, graph.reverse_edge),
+            "edge_source_links": lambda f: _write_edge_source_links(f, graph),
         }
-        for name, _offset, expected_size in directory:
+        for name, offset, expected_size in directory:
+            _pad_until(fp, offset)
             before = fp.tell()
             writers[name](fp)
             actual_size = fp.tell() - before
@@ -339,7 +466,7 @@ def read_rdb(path: str | Path) -> MmapRoadGraph:
         magic, version, section_count = _HEADER.unpack_from(mm, 0)
         if magic != MAGIC:
             raise ValueError(f"invalid RDB magic: {magic!r}")
-        if version not in SUPPORTED_FORMAT_VERSIONS:
+        if version != FORMAT_VERSION:
             raise ValueError(f"unsupported RDB version: {version}")
 
         sections = _read_directory(mm, section_count)
@@ -347,6 +474,9 @@ def read_rdb(path: str | Path) -> MmapRoadGraph:
         if missing:
             raise ValueError(f"missing RDB sections: {', '.join(missing)}")
         metadata = json.loads(_section_bytes(mm, sections, "metadata").decode("utf-8"))
+        metadata_version = int(metadata.get("format_version", version))
+        if metadata_version != FORMAT_VERSION:
+            raise ValueError(f"RDB metadata version {metadata_version} is unsupported")
         return MmapRoadGraph(source, fp, mm, metadata, sections)
     except Exception:
         mm.close()
@@ -469,23 +599,22 @@ def _write_section_entry(fp: BinaryIO, name: str, offset: int, size: int) -> Non
     fp.write(_SECTION.pack(encoded.ljust(32, b"\0"), offset, size))
 
 
-def _write_nodes(fp: BinaryIO, graph: RoadGraph) -> None:
-    for x, y in zip(graph.node_x, graph.node_y):
-        fp.write(_NODE.pack(x, y))
+def _align(offset: int, alignment: int = SECTION_ALIGNMENT) -> int:
+    return ((offset + alignment - 1) // alignment) * alignment
 
 
-def _write_edges(fp: BinaryIO, graph: RoadGraph) -> None:
+def _pad_until(fp: BinaryIO, offset: int) -> None:
+    current = fp.tell()
+    if current > offset:
+        raise ValueError(f"section writer passed expected offset {offset}")
+    if current < offset:
+        fp.write(b"\0" * (offset - current))
+
+
+def _write_edge_source_links(fp: BinaryIO, graph: RoadGraph) -> None:
     for idx in range(graph.edge_count):
-        fp.write(
-            _EDGE.pack(
-                graph.edge_from[idx],
-                graph.edge_to[idx],
-                graph.edge_length[idx],
-                graph.reverse_edge[idx],
-                graph.edge_geom[idx],
-                graph.edge_source_link[idx] if idx < len(graph.edge_source_link) else UINT32_NONE,
-            )
-        )
+        value = graph.edge_source_link[idx] if idx < len(graph.edge_source_link) else UINT32_NONE
+        fp.write(_U32.pack(value))
 
 
 def _write_snap_geom_records(fp: BinaryIO, graph: RoadGraph) -> None:
@@ -498,6 +627,19 @@ def _write_snap_geom_records(fp: BinaryIO, graph: RoadGraph) -> None:
                 geom.reverse_edge if geom.reverse_edge is not None else UINT32_NONE,
                 round(geom.length_m * graph.length_scale),
                 len(geom.points),
+            )
+        )
+
+
+def _write_snap_geom_bboxes(fp: BinaryIO, graph: RoadGraph) -> None:
+    for geom in graph.snap_geometries:
+        min_x, min_y, max_x, max_y = geom.bbox
+        fp.write(
+            _BBOX.pack(
+                math.floor((min_x - graph.origin_x_m) * graph.coord_scale),
+                math.floor((min_y - graph.origin_y_m) * graph.coord_scale),
+                math.ceil((max_x - graph.origin_x_m) * graph.coord_scale),
+                math.ceil((max_y - graph.origin_y_m) * graph.coord_scale),
             )
         )
 
@@ -557,10 +699,22 @@ def _read_directory(data: mmap.mmap, section_count: int) -> dict[str, Section]:
         name = raw_name.split(b"\0", 1)[0].decode("ascii")
         if not name:
             raise ValueError("RDB section has an empty name")
+        if name in sections:
+            raise ValueError(f"duplicate RDB section: {name}")
         if offset + size > len(data):
             raise ValueError(f"RDB section extends beyond file: {name}")
         sections[name] = Section(offset, size)
+    _validate_section_ranges(sections)
     return sections
+
+
+def _validate_section_ranges(sections: Mapping[str, Section]) -> None:
+    ranges = sorted((section.offset, section.offset + section.size, name) for name, section in sections.items())
+    for idx in range(1, len(ranges)):
+        _previous_start, previous_end, previous_name = ranges[idx - 1]
+        current_start, _current_end, current_name = ranges[idx]
+        if current_start < previous_end:
+            raise ValueError(f"RDB sections overlap: {previous_name}, {current_name}")
 
 
 def _section_bytes(data: mmap.mmap, sections: Mapping[str, Section], name: str) -> bytes:

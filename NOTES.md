@@ -1,5 +1,12 @@
 # Road RDB Handoff Notes
 
+Implementation notes for the experimental v0.1.0 release. Use `README.md` for
+installation, `SPEC.md` for the current binary layout, and `docs/RELEASING.md`
+for release checks. Benchmarks below are historical development observations;
+the national source dataset and generated binaries are not bundled or currently
+present in this checkout. Historical artifact names such as `full_gb_v2.rdb`
+do not describe the supported format version.
+
 This project is an experimental OS Open Roads routing-kernel prototype. The
 current goal is not navigation-grade routing. The goal is to evaluate a compact
 single binary file that can be memory-mapped, queried quickly, and return an
@@ -13,7 +20,7 @@ Main source data:
 oproad_gpkg_gb/Data/oproad_gb.gpkg
 ```
 
-Current full routing binary:
+Expected local full routing binary after building:
 
 ```text
 build/full_gb.rdb
@@ -39,16 +46,20 @@ have been built for bbox experiments.
 ```text
 roads_rdb/gpkg.py       GeoPackageBinary decoding and road_node/road_link iterators
 roads_rdb/geo.py        WGS84 lat/lon -> British National Grid conversion
-roads_rdb/graph.py      Graph model, snap index access, Dijkstra route query
+roads_rdb/graph.py      Graph model, snap index access, A* route query
 roads_rdb/rdb.py        RDB writer and mmap-backed RDB reader
 roads_rdb/lookup.py     Companion SQLite lookup writer for bbox builds
-roads_rdb/cli.py        build/query/inspect/bench CLI
+roads_rdb/cli.py        build/query/batch/inspect/bench CLI
+roads_rdb/map_server.py Local map and route HTTP API
+roads_rdb/directions.py Approximate road-name/bearing directions
 
 scripts/evaluate_directions.py        RDB route + GeoPackage SQL enrichment
 scripts/benchmark_distance_bands.py   RDB-only benchmark by straight-line distance band
 
 tests/test_gpkg.py      GeoPackage geometry tests
 tests/test_rdb.py       RDB round-trip/query test
+tests/test_cli.py       Synthetic build/query/batch/lookup integration tests
+tests/test_map_server.py Map page, route API, and malformed-request tests
 ```
 
 Run tests:
@@ -65,10 +76,14 @@ The RDB file is a simple sectioned binary format:
 header
 section directory
 metadata JSON
-nodes
-edges
+node_x
+node_y
+edge_to
+edge_length
+edge_geom
 offsets
 snap_geom_records
+snap_geom_bboxes
 snap_geom_offsets
 snap_geom_points
 snap_tiles
@@ -81,7 +96,7 @@ Header:
 
 ```text
 magic:          RDB1
-format_version: 2 for new builds; v1 files are still readable
+format_version: 1; earlier prototype layouts are unsupported
 section_count:  u32
 ```
 
@@ -96,8 +111,10 @@ size:   u64
 Core records:
 
 ```text
-node:              x_units:u32, y_units:u32
-edge:              from:u32, to:u32, length_dm:u32, reverse:u32, geom_id:u32, source_link:u32
+node_x / node_y:    separate x_units:u32[] and y_units:u32[] arrays
+edge hot path:     separate to:u32[], length_units:u32[], geom_id:u32[] arrays
+edge reverse:      optional reverse_edge:u32[]
+edge source links: optional source_link:u32[]
 adjacency offset:  u32
 snap geom record:  start_node:u32, end_node:u32, forward_edge:u32, reverse_edge:u32,
                    length_dm:u32, point_count:u32
@@ -213,7 +230,7 @@ origin_snap / target_snap metadata
 The current query workspace uses compact arrays:
 
 ```text
-dist:      array("d")
+dist:      array("Q"), integer length units
 prev_node: array("i")
 prev_edge: array("i")
 touched node lists for reset
@@ -338,8 +355,8 @@ No one-way restrictions.
 No turn restrictions.
 No traffic/speed profile yet.
 No road access restrictions.
-Existing `build/full_gb.rdb` may still be a v1 file without component/reverse
-adjacency sections until rebuilt.
+Only current format-1 indexes with the required component and snap-bbox sections
+are supported. Rebuild indexes created by earlier prototypes.
 No corridor compression yet.
 No cell overlays or shortcut hierarchy yet.
 ```
@@ -382,7 +399,7 @@ pure-Python path.
 High-value next steps:
 
 ```text
-1. Rebuild `build/full_gb.rdb` so the full artifact has lean v2 component sections.
+1. Rebuild `build/full_gb.rdb` using the current format-1 split-array layout.
 2. Re-benchmark A* across 10/50/100/200 km bands.
 3. Add corridor compression for degree-2 chains.
 4. Add shortcut unpacking so route output still returns original node IDs.
@@ -397,7 +414,7 @@ High-value next steps:
 The immediate next iteration should be:
 
 ```text
-full v2 rebuild + distance-band benchmark comparison
+full format-1 rebuild + distance-band benchmark comparison
 ```
 
 That will show whether corridor compression or hierarchy is justified.

@@ -3,11 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import sqlite3
 import statistics
 import time
 from pathlib import Path
 
-from .graph import QueryWorkspace, build_graph_from_gpkg, parse_bbox, parse_point, route_nodes
+from .graph import QueryWorkspace, build_graph_from_gpkg, parse_bbox, parse_point, route_nodes, route_nodes_batch
 from .lookup import write_lookup_db
 from .rdb import read_rdb, write_rdb
 
@@ -32,6 +33,14 @@ def main(argv: list[str] | None = None) -> int:
     query.add_argument("--snap-candidates", type=int, default=8)
     query.add_argument("--with-edges", action="store_true")
 
+    batch = sub.add_parser("batch", help="route from one BNG coordinate to multiple targets")
+    batch.add_argument("--index", required=True)
+    batch.add_argument("--from", dest="origin", required=True, help="BNG x,y")
+    batch.add_argument("--to", dest="targets", action="append", required=True, help="target BNG x,y; repeatable")
+    batch.add_argument("--snap-radius", type=float, default=250.0)
+    batch.add_argument("--snap-candidates", type=int, default=8)
+    batch.add_argument("--with-edges", action="store_true")
+
     inspect = sub.add_parser("inspect", help="print dataset summary")
     inspect.add_argument("--index", required=True)
 
@@ -42,14 +51,19 @@ def main(argv: list[str] | None = None) -> int:
     bench.add_argument("--sample", choices=["nodes", "bbox"], default="nodes")
 
     args = parser.parse_args(argv)
-    if args.command == "build":
-        return _build(args)
-    if args.command == "query":
-        return _query(args)
-    if args.command == "inspect":
-        return _inspect(args)
-    if args.command == "bench":
-        return _bench(args)
+    try:
+        if args.command == "build":
+            return _build(args)
+        if args.command == "query":
+            return _query(args)
+        if args.command == "batch":
+            return _batch(args)
+        if args.command == "inspect":
+            return _inspect(args)
+        if args.command == "bench":
+            return _bench(args)
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        parser.exit(2, f"{parser.prog}: error: {exc}\n")
     raise AssertionError(args.command)
 
 
@@ -82,29 +96,48 @@ def _build(args: argparse.Namespace) -> int:
 
 def _query(args: argparse.Namespace) -> int:
     graph = read_rdb(args.index)
-    result = route_nodes(
-        graph,
-        parse_point(args.origin),
-        parse_point(args.target),
-        snap_radius_m=args.snap_radius,
-        snap_candidates=args.snap_candidates,
-    )
-    payload: dict[str, object] = {
-        "node_count": len(result.node_ids),
-        "nodes": result.node_ids,
-        "cost_m": round(result.cost_m, 3),
-        "origin_snap": _snap_payload(result.origin_snap),
-        "target_snap": _snap_payload(result.target_snap),
-    }
-    if args.with_edges:
-        payload["edges"] = result.edge_ids
-    print(json.dumps(payload, indent=2))
-    return 0
+    try:
+        result = route_nodes(
+            graph,
+            parse_point(args.origin),
+            parse_point(args.target),
+            snap_radius_m=args.snap_radius,
+            snap_candidates=args.snap_candidates,
+        )
+        payload = _route_payload(result, with_edges=args.with_edges)
+        print(json.dumps(payload, indent=2))
+        return 0
+    finally:
+        graph.close()
+
+
+def _batch(args: argparse.Namespace) -> int:
+    graph = read_rdb(args.index)
+    try:
+        workspace = QueryWorkspace(graph.node_count)
+        results = route_nodes_batch(
+            graph,
+            parse_point(args.origin),
+            [parse_point(target) for target in args.targets],
+            snap_radius_m=args.snap_radius,
+            snap_candidates=args.snap_candidates,
+            workspace=workspace,
+        )
+        payload = {
+            "origin": parse_point(args.origin),
+            "target_count": len(args.targets),
+            "routes": [_route_payload(result, with_edges=args.with_edges) for result in results],
+        }
+        print(json.dumps(payload, indent=2))
+        return 0
+    finally:
+        graph.close()
 
 
 def _inspect(args: argparse.Namespace) -> int:
     graph = read_rdb(args.index)
     payload = {
+        "format_version": graph.metadata.get("format_version"),
         "nodes": graph.node_count,
         "directed_edges": graph.edge_count,
         "snap_geometries": _snap_geometry_count(graph),
@@ -168,6 +201,19 @@ def _snap_payload(snap) -> dict[str, float | int]:
         "x": round(snap.projected_x, 3),
         "y": round(snap.projected_y, 3),
     }
+
+
+def _route_payload(result, *, with_edges: bool) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "node_count": len(result.node_ids),
+        "nodes": result.node_ids,
+        "cost_m": round(result.cost_m, 3),
+        "origin_snap": _snap_payload(result.origin_snap),
+        "target_snap": _snap_payload(result.target_snap),
+    }
+    if with_edges:
+        payload["edges"] = result.edge_ids
+    return payload
 
 
 def _snap_geometry_count(graph) -> int:

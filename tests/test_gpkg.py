@@ -58,6 +58,7 @@ class DecodeGeoPackageGeometryTests(unittest.TestCase):
 class GeoPackageIteratorTests(unittest.TestCase):
     def test_iter_nodes_filters_bbox_without_rtree_and_limits_after_filtering(self):
         conn = sqlite3.connect(":memory:")
+        self.addCleanup(conn.close)
         conn.execute(
             """
             CREATE TABLE road_node (
@@ -87,6 +88,7 @@ class GeoPackageIteratorTests(unittest.TestCase):
 
     def test_iter_links_decodes_geometry_and_filters_with_rtree(self):
         conn = sqlite3.connect(":memory:")
+        self.addCleanup(conn.close)
         conn.execute(
             """
             CREATE TABLE road_link (
@@ -171,6 +173,7 @@ class GeoPackageIteratorTests(unittest.TestCase):
 
     def test_iter_links_filters_bbox_without_rtree(self):
         conn = sqlite3.connect(":memory:")
+        self.addCleanup(conn.close)
         conn.execute(
             """
             CREATE TABLE road_link (

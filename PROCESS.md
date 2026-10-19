@@ -1,5 +1,9 @@
 # Road DB Build And Query Process
 
+Design proposal and future roadmap. Sections describing overlays, compression,
+and additional formats are not a list of v0.1.0 features. See `README.md` for
+implemented behavior and `SPEC.md` for the current format-1 layout.
+
 This document defines an end-to-end process for turning the OS Open Roads
 GeoPackage into a compact, memory-loadable `dataset.rdb` routing kernel.
 

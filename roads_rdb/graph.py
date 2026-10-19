@@ -5,6 +5,7 @@ import math
 import sqlite3
 from array import array
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Iterable
 
 from .gpkg import LineString, Point, decode_gpkg_geometry, iter_links, iter_nodes
@@ -13,6 +14,7 @@ from .gpkg import LineString, Point, decode_gpkg_geometry, iter_links, iter_node
 DEFAULT_TILE_SIZE_M = 256.0
 DEFAULT_SNAP_RADIUS_M = 250.0
 UINT32_NONE = 0xFFFFFFFF
+MAX_COST_UNITS = 0xFFFFFFFFFFFFFFFF
 
 
 @dataclass(slots=True)
@@ -94,6 +96,9 @@ class RoadGraph:
     def edge_target_and_length_m(self, edge_id: int) -> tuple[int, float]:
         return self.edge_to[edge_id], self.edge_length[edge_id] / self.length_scale
 
+    def edge_target_and_length_units(self, edge_id: int) -> tuple[int, int]:
+        return self.edge_to[edge_id], self.edge_length[edge_id]
+
     def edge_geom_id(self, edge_id: int) -> int:
         return self.edge_geom[edge_id]
 
@@ -114,9 +119,23 @@ class RoadGraph:
     def snap_distance(self, geom_id: int, x: float, y: float) -> tuple[float, float, float, float]:
         return _point_to_polyline(x, y, self.snap_geometries[geom_id].points)
 
+    def snap_geom_may_intersect_radius(self, geom_id: int, x: float, y: float, radius_m: float) -> bool:
+        min_x, min_y, max_x, max_y = self.snap_geometries[geom_id].bbox
+        return not (
+            x < min_x - radius_m
+            or x > max_x + radius_m
+            or y < min_y - radius_m
+            or y > max_y + radius_m
+        )
+
     def snap_endpoint_costs(self, geom_id: int, snap: SnapCandidate) -> tuple[tuple[int, float], ...]:
         geom = self.snap_geometries[geom_id]
         return _snap_endpoint_costs(geom.start_node, geom.end_node, geom.length_m, snap)
+
+    def snap_endpoint_cost_units(self, geom_id: int, snap: SnapCandidate) -> tuple[tuple[int, int], ...]:
+        geom = self.snap_geometries[geom_id]
+        length_units = round(geom.length_m * self.length_scale)
+        return _snap_endpoint_costs_units(geom.start_node, geom.end_node, length_units, self.length_scale, snap)
 
 
 @dataclass(slots=True)
@@ -148,12 +167,13 @@ class QueryWorkspace:
     """Reusable per-thread route query state.
 
     The workspace still owns full-size arrays, but they are allocated once and
-    only nodes touched by the previous query are reset.
+    only nodes touched by the previous query are reset. Distances are stored in
+    integer length units so the search loop avoids per-edge metre conversion.
     """
 
     def __init__(self, node_count: int) -> None:
         self.node_count = node_count
-        self.dist = array("d", [math.inf]) * node_count
+        self.dist = array("Q", [MAX_COST_UNITS]) * node_count
         self.prev_node = array("i", [-1]) * node_count
         self.prev_edge = array("i", [-1]) * node_count
         self.settled = array("b", [0]) * node_count
@@ -166,15 +186,15 @@ class QueryWorkspace:
 
     def reset(self) -> None:
         for node_id in self.touched:
-            self.dist[node_id] = math.inf
+            self.dist[node_id] = MAX_COST_UNITS
             self.prev_node[node_id] = -1
             self.prev_edge[node_id] = -1
             self.settled[node_id] = 0
         self.touched.clear()
         self.heap.clear()
 
-    def set_forward(self, node_id: int, cost: float, prev_node: int = -1, prev_edge: int = -1) -> None:
-        if math.isinf(self.dist[node_id]):
+    def set_forward(self, node_id: int, cost: int, prev_node: int = -1, prev_edge: int = -1) -> None:
+        if self.dist[node_id] == MAX_COST_UNITS:
             self.touched.append(node_id)
         self.dist[node_id] = cost
         self.prev_node[node_id] = prev_node
@@ -214,7 +234,10 @@ def build_graph_from_gpkg(
     build uses two link scans to avoid retaining millions of raw link dicts.
     """
 
-    conn = sqlite3.connect(gpkg_path)
+    source = Path(gpkg_path)
+    if not source.is_file():
+        raise FileNotFoundError(f"GeoPackage not found: {source}")
+    conn = sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True)
     try:
         if bbox is None:
             source_nodes = {
@@ -537,6 +560,8 @@ def snap_point(
 
     candidates: list[SnapCandidate] = []
     for geom_id in geom_ids:
+        if not graph.snap_geom_may_intersect_radius(geom_id, x, y, radius_m):
+            continue
         distance_m, along_m, px, py = graph.snap_distance(geom_id, x, y)
         if distance_m <= radius_m:
             candidates.append(SnapCandidate(geom_id, distance_m, along_m, px, py))
@@ -554,37 +579,75 @@ def route_nodes(
     snap_candidates: int = 8,
     workspace: QueryWorkspace | None = None,
 ) -> RouteResult:
+    return route_nodes_batch(
+        graph,
+        origin,
+        [target],
+        snap_radius_m=snap_radius_m,
+        snap_candidates=snap_candidates,
+        workspace=workspace,
+    )[0]
+
+
+def route_nodes_batch(
+    graph: RoadGraph,
+    origin: tuple[float, float],
+    targets: Iterable[tuple[float, float]],
+    *,
+    snap_radius_m: float = DEFAULT_SNAP_RADIUS_M,
+    snap_candidates: int = 8,
+    workspace: QueryWorkspace | None = None,
+) -> list[RouteResult]:
+    """Route from one origin to targets in order.
+
+    The origin is snapped once and reused. This strict batch helper raises on
+    the first target that cannot be snapped or routed.
+    """
+
+    target_list = list(targets)
+    if not target_list:
+        return []
+
     origin_snaps = snap_point(graph, origin[0], origin[1], radius_m=snap_radius_m, limit=snap_candidates)
-    target_snaps = snap_point(graph, target[0], target[1], radius_m=snap_radius_m, limit=snap_candidates)
     if not origin_snaps:
         raise ValueError("origin did not snap to any road link")
-    if not target_snaps:
-        raise ValueError("target did not snap to any road link")
 
     start_costs = _endpoint_costs(graph, origin_snaps)
-    target_costs = _endpoint_costs(graph, target_snaps)
-    start_costs, target_costs = _filter_endpoint_costs_by_component(graph, start_costs, target_costs)
 
     query_workspace = workspace or QueryWorkspace(graph.node_count)
     if query_workspace.node_count != graph.node_count:
         raise ValueError("query workspace node count does not match graph")
-    query_workspace.reset()
 
-    return _search_astar(
-        graph,
-        start_costs,
-        target_costs,
-        query_workspace,
-    )
+    results: list[RouteResult] = []
+    for target in target_list:
+        target_snaps = snap_point(graph, target[0], target[1], radius_m=snap_radius_m, limit=snap_candidates)
+        if not target_snaps:
+            raise ValueError("target did not snap to any road link")
+        target_costs = _endpoint_costs(graph, target_snaps)
+        filtered_start_costs, filtered_target_costs = _filter_endpoint_costs_by_component(
+            graph,
+            start_costs,
+            target_costs,
+        )
+        query_workspace.reset()
+        results.append(
+            _search_astar(
+                graph,
+                filtered_start_costs,
+                filtered_target_costs,
+                query_workspace,
+            )
+        )
+    return results
 
 
 def _endpoint_costs(
     graph: RoadGraph,
     snaps: Iterable[SnapCandidate],
-) -> dict[int, tuple[float, SnapCandidate]]:
-    costs: dict[int, tuple[float, SnapCandidate]] = {}
+) -> dict[int, tuple[int, SnapCandidate]]:
+    costs: dict[int, tuple[int, SnapCandidate]] = {}
     for snap in snaps:
-        for node_id, cost in graph.snap_endpoint_costs(snap.geom_id, snap):
+        for node_id, cost in graph.snap_endpoint_cost_units(snap.geom_id, snap):
             current = costs.get(node_id)
             if current is None or cost < current[0]:
                 costs[node_id] = (cost, snap)
@@ -593,9 +656,9 @@ def _endpoint_costs(
 
 def _filter_endpoint_costs_by_component(
     graph: RoadGraph,
-    start_costs: dict[int, tuple[float, SnapCandidate]],
-    target_costs: dict[int, tuple[float, SnapCandidate]],
-) -> tuple[dict[int, tuple[float, SnapCandidate]], dict[int, tuple[float, SnapCandidate]]]:
+    start_costs: dict[int, tuple[int, SnapCandidate]],
+    target_costs: dict[int, tuple[int, SnapCandidate]],
+) -> tuple[dict[int, tuple[int, SnapCandidate]], dict[int, tuple[int, SnapCandidate]]]:
     if not getattr(graph, "has_components", False):
         return start_costs, target_costs
     start_components = {graph.component_id(node_id) for node_id in start_costs}
@@ -621,27 +684,58 @@ def _filter_endpoint_costs_by_component(
 
 def _search_astar(
     graph: RoadGraph,
-    start_costs: dict[int, tuple[float, SnapCandidate]],
-    target_costs: dict[int, tuple[float, SnapCandidate]],
+    start_costs: dict[int, tuple[int, SnapCandidate]],
+    target_costs: dict[int, tuple[int, SnapCandidate]],
     workspace: QueryWorkspace,
 ) -> RouteResult:
-    heuristic = _target_heuristic(graph, target_costs)
+    heuristic = _target_heuristic_units(graph, target_costs)
+    split_edge_to = getattr(graph, "_edge_to_u32", None)
+    split_edge_length = getattr(graph, "_edge_length_u32", None)
+    split_offsets = getattr(graph, "_offsets_u32", None)
+    if split_edge_to is not None and split_edge_length is not None and split_offsets is not None:
+        return _search_astar_split(
+            graph,
+            start_costs,
+            target_costs,
+            workspace,
+            heuristic,
+            split_edge_to,
+            split_edge_length,
+            split_offsets,
+        )
+
+    dist = workspace.dist
+    prev_node = workspace.prev_node
+    prev_edge = workspace.prev_edge
+    settled = workspace.settled
+    touched = workspace.touched
+    heap = workspace.heap
+    inf = MAX_COST_UNITS
+    heappush = heapq.heappush
+    heappop = heapq.heappop
+    outgoing_edges = graph.outgoing_edges
+    edge_target_and_length_units = graph.edge_target_and_length_units
+
     for node_id, (cost, _snap) in start_costs.items():
-        workspace.set_forward(node_id, cost)
-        heapq.heappush(workspace.heap, (cost + heuristic(node_id), cost, node_id))
+        if dist[node_id] == inf:
+            touched.append(node_id)
+        dist[node_id] = cost
+        prev_node[node_id] = -1
+        prev_edge[node_id] = -1
+        heappush(heap, (cost + heuristic(node_id), cost, node_id))
 
     best_target = -1
-    best_total = math.inf
+    best_total = MAX_COST_UNITS
     best_target_snap: SnapCandidate | None = None
 
-    while workspace.heap:
-        priority, cost, node_id = heapq.heappop(workspace.heap)
-        if cost != workspace.dist[node_id] or workspace.settled[node_id]:
+    while heap:
+        priority, cost, node_id = heappop(heap)
+        if cost != dist[node_id] or settled[node_id]:
             continue
         if priority >= best_total:
             break
 
-        workspace.settled[node_id] = 1
+        settled[node_id] = 1
         target_entry = target_costs.get(node_id)
         if target_entry is not None:
             total = cost + target_entry[0]
@@ -650,14 +744,18 @@ def _search_astar(
                 best_target = node_id
                 best_target_snap = target_entry[1]
 
-        for edge_id in graph.outgoing_edges(node_id):
-            next_node, edge_length_m = graph.edge_target_and_length_m(edge_id)
-            if workspace.settled[next_node]:
+        for edge_id in outgoing_edges(node_id):
+            next_node, edge_length_units = edge_target_and_length_units(edge_id)
+            if settled[next_node]:
                 continue
-            next_cost = cost + edge_length_m
-            if next_cost < workspace.dist[next_node]:
-                workspace.set_forward(next_node, next_cost, node_id, edge_id)
-                heapq.heappush(workspace.heap, (next_cost + heuristic(next_node), next_cost, next_node))
+            next_cost = cost + edge_length_units
+            if next_cost < dist[next_node]:
+                if dist[next_node] == inf:
+                    touched.append(next_node)
+                dist[next_node] = next_cost
+                prev_node[next_node] = node_id
+                prev_edge[next_node] = edge_id
+                heappush(heap, (next_cost + heuristic(next_node), next_cost, next_node))
 
     if best_target < 0 or best_target_snap is None:
         raise ValueError("no route found between snapped candidates")
@@ -667,7 +765,82 @@ def _search_astar(
     return RouteResult(
         path_nodes,
         path_edges,
-        best_total,
+        best_total / graph.length_scale,
+        origin_snap,
+        best_target_snap,
+    )
+
+
+def _search_astar_split(
+    graph: RoadGraph,
+    start_costs: dict[int, tuple[int, SnapCandidate]],
+    target_costs: dict[int, tuple[int, SnapCandidate]],
+    workspace: QueryWorkspace,
+    heuristic,
+    edge_to,
+    edge_length,
+    offsets,
+) -> RouteResult:
+    dist = workspace.dist
+    prev_node = workspace.prev_node
+    prev_edge = workspace.prev_edge
+    settled = workspace.settled
+    touched = workspace.touched
+    heap = workspace.heap
+    inf = MAX_COST_UNITS
+    heappush = heapq.heappush
+    heappop = heapq.heappop
+
+    for node_id, (cost, _snap) in start_costs.items():
+        if dist[node_id] == inf:
+            touched.append(node_id)
+        dist[node_id] = cost
+        prev_node[node_id] = -1
+        prev_edge[node_id] = -1
+        heappush(heap, (cost + heuristic(node_id), cost, node_id))
+
+    best_target = -1
+    best_total = MAX_COST_UNITS
+    best_target_snap: SnapCandidate | None = None
+
+    while heap:
+        priority, cost, node_id = heappop(heap)
+        if cost != dist[node_id] or settled[node_id]:
+            continue
+        if priority >= best_total:
+            break
+
+        settled[node_id] = 1
+        target_entry = target_costs.get(node_id)
+        if target_entry is not None:
+            total = cost + target_entry[0]
+            if total < best_total:
+                best_total = total
+                best_target = node_id
+                best_target_snap = target_entry[1]
+
+        for edge_id in range(offsets[node_id], offsets[node_id + 1]):
+            next_node = edge_to[edge_id]
+            if settled[next_node]:
+                continue
+            next_cost = cost + edge_length[edge_id]
+            if next_cost < dist[next_node]:
+                if dist[next_node] == inf:
+                    touched.append(next_node)
+                dist[next_node] = next_cost
+                prev_node[next_node] = node_id
+                prev_edge[next_node] = edge_id
+                heappush(heap, (next_cost + heuristic(next_node), next_cost, next_node))
+
+    if best_target < 0 or best_target_snap is None:
+        raise ValueError("no route found between snapped candidates")
+
+    path_nodes, path_edges = _reconstruct_forward_path(workspace, best_target)
+    origin_snap = start_costs[path_nodes[0]][1]
+    return RouteResult(
+        path_nodes,
+        path_edges,
+        best_total / graph.length_scale,
         origin_snap,
         best_target_snap,
     )
@@ -688,18 +861,93 @@ def _reconstruct_forward_path(workspace: QueryWorkspace, target_node: int) -> tu
     return path_nodes, path_edges
 
 
-def _target_heuristic(
+def _target_heuristic_units(
     graph: RoadGraph,
-    target_costs: dict[int, tuple[float, SnapCandidate]],
+    target_costs: dict[int, tuple[int, SnapCandidate]],
 ):
+    coord_to_length_units = graph.length_scale / graph.coord_scale
+    hypot = math.hypot
+    node_x = getattr(graph, "_node_x_u32", None)
+    node_y = getattr(graph, "_node_y_u32", None)
+
+    if node_x is not None and node_y is not None:
+        target_refs = [
+            (
+                node_x[node_id],
+                node_y[node_id],
+                endpoint_cost,
+            )
+            for node_id, (endpoint_cost, _snap) in target_costs.items()
+        ]
+
+        if len(target_refs) == 1:
+            tx, ty, endpoint_cost = target_refs[0]
+
+            def heuristic(node_id: int) -> int:
+                return int(hypot(node_x[node_id] - tx, node_y[node_id] - ty) * coord_to_length_units) + endpoint_cost
+
+            return heuristic
+
+        if len(target_refs) == 2:
+            tx0, ty0, endpoint_cost0 = target_refs[0]
+            tx1, ty1, endpoint_cost1 = target_refs[1]
+
+            def heuristic(node_id: int) -> int:
+                x = node_x[node_id]
+                y = node_y[node_id]
+                estimate0 = int(hypot(x - tx0, y - ty0) * coord_to_length_units) + endpoint_cost0
+                estimate1 = int(hypot(x - tx1, y - ty1) * coord_to_length_units) + endpoint_cost1
+                return estimate0 if estimate0 <= estimate1 else estimate1
+
+            return heuristic
+
+        def heuristic(node_id: int) -> int:
+            x = node_x[node_id]
+            y = node_y[node_id]
+            best = MAX_COST_UNITS
+            for tx, ty, endpoint_cost in target_refs:
+                estimate = int(hypot(x - tx, y - ty) * coord_to_length_units) + endpoint_cost
+                if estimate < best:
+                    best = estimate
+            return best
+
+        return heuristic
+
+    node_units = graph.node_units
     target_refs = [
-        (*graph.node_xy(node_id), endpoint_cost)
+        (*node_units(node_id), endpoint_cost)
         for node_id, (endpoint_cost, _snap) in target_costs.items()
     ]
 
-    def heuristic(node_id: int) -> float:
-        x, y = graph.node_xy(node_id)
-        return min(math.hypot(x - tx, y - ty) + endpoint_cost for tx, ty, endpoint_cost in target_refs)
+    if len(target_refs) == 1:
+        tx, ty, endpoint_cost = target_refs[0]
+
+        def heuristic(node_id: int) -> int:
+            x, y = node_units(node_id)
+            return int(hypot(x - tx, y - ty) * coord_to_length_units) + endpoint_cost
+
+        return heuristic
+
+    if len(target_refs) == 2:
+        tx0, ty0, endpoint_cost0 = target_refs[0]
+        tx1, ty1, endpoint_cost1 = target_refs[1]
+
+        def heuristic(node_id: int) -> int:
+            x, y = node_units(node_id)
+            estimate0 = int(hypot(x - tx0, y - ty0) * coord_to_length_units) + endpoint_cost0
+            estimate1 = int(hypot(x - tx1, y - ty1) * coord_to_length_units) + endpoint_cost1
+            return estimate0 if estimate0 <= estimate1 else estimate1
+
+        return heuristic
+
+    def heuristic(node_id: int) -> int:
+        x, y = node_units(node_id)
+        best = MAX_COST_UNITS
+        for tx, ty, endpoint_cost in target_refs:
+            estimate = int(hypot(x - tx, y - ty) * coord_to_length_units) + endpoint_cost
+            if estimate < best:
+                best = estimate
+        return best
 
     return heuristic
 
@@ -744,6 +992,25 @@ def _snap_endpoint_costs(
     return (
         (start_node, along),
         (end_node, max(0.0, length_m - along)),
+    )
+
+
+def _snap_endpoint_costs_units(
+    start_node: int,
+    end_node: int,
+    length_units: int,
+    length_scale: int,
+    snap: SnapCandidate,
+) -> tuple[tuple[int, int], ...]:
+    along_units = min(max(round(snap.along_m * length_scale), 0), length_units)
+    if along_units <= 0:
+        return ((start_node, 0),)
+    remaining_units = length_units - along_units
+    if remaining_units <= 0:
+        return ((end_node, 0),)
+    return (
+        (start_node, along_units),
+        (end_node, remaining_units),
     )
 
 

@@ -1,0 +1,19 @@
+roads-rdb source code and its synthetic examples are licensed under the MIT
+License; see LICENSE.
+
+OS Open Roads is a separate Ordnance Survey dataset. No OS dataset or derived
+RDB is bundled with this software. Use of OS OpenData is subject to the Open
+Government Licence v3.0 and the acknowledgements supplied with the dataset:
+https://os.uk/opendata/licence
+https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
+
+The acknowledgement supplied with the 2026 OS Open Roads download is:
+Contains OS data © Crown Copyright and database rights 2026.
+Use the year and any additional acknowledgements supplied with your download
+when sharing derived datasets, maps, or screenshots.
+
+The optional web map loads Leaflet 1.9.4 (BSD-2-Clause) from unpkg.com:
+https://github.com/Leaflet/Leaflet/blob/v1.9.4/LICENSE
+Its background tiles are provided by OpenStreetMap:
+© OpenStreetMap contributors, https://www.openstreetmap.org/copyright
+Tile usage policy: https://operations.osmfoundation.org/policies/tiles/

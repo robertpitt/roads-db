@@ -1,2 +1,23 @@
-oproad_gpkg_gb/*
-build/*
+# Downloaded source data and generated routing databases
+/oproad_gpkg_gb/
+/build/
+*.gpkg
+*.rdb
+*.sqlite
+*.sqlite-*
+
+# Python environments, caches, and distribution output
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+/dist/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local configuration and OS metadata
+.env
+.env.*
+.DS_Store

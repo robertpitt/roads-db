@@ -1,0 +1,7 @@
+include LICENSE NOTICE README.md CHANGELOG.md CONTRIBUTING.md SPEC.md
+include NOTES.md database_shape.md Idea.md PROCESS.md
+recursive-include docs *.md
+recursive-include examples *.py
+recursive-include scripts *.py
+recursive-include tests *.py
+global-exclude *.py[cod] .DS_Store

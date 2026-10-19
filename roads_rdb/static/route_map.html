@@ -1,0 +1,698 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Roads RDB Map</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <style>
+      :root {
+        --ink: #15140f;
+        --paper: #fffaf0;
+        --line: #d8cfbc;
+        --muted: #625d52;
+        --field: #f3ead8;
+        --route: #d33f2f;
+        --route-dark: #54251d;
+        --teal: #006b66;
+        --gold: #d8a22a;
+        --shadow: 0 18px 48px rgba(25, 22, 15, 0.22);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body,
+      #map {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        overflow: hidden;
+        color: var(--ink);
+        font-family: "Avenir Next", "DIN Alternate", "Gill Sans", sans-serif;
+        letter-spacing: 0;
+      }
+
+      #map {
+        background: #e7e1d3;
+      }
+
+      .topbar {
+        position: fixed;
+        z-index: 800;
+        top: 18px;
+        left: 18px;
+        right: 18px;
+        display: grid;
+        grid-template-columns: minmax(170px, 1fr) auto auto;
+        align-items: center;
+        gap: 10px;
+        pointer-events: none;
+      }
+
+      .brand,
+      .control,
+      .metrics,
+      .status {
+        pointer-events: auto;
+        border: 1px solid rgba(21, 20, 15, 0.16);
+        background: color-mix(in srgb, var(--paper) 92%, transparent);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(14px);
+      }
+
+      .brand {
+        width: fit-content;
+        min-height: 48px;
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        padding: 8px 14px 8px 10px;
+      }
+
+      .brand-mark {
+        width: 31px;
+        height: 31px;
+        display: grid;
+        place-items: center;
+        border-radius: 50%;
+        background: var(--ink);
+        color: var(--paper);
+        font-family: Georgia, serif;
+        font-weight: 700;
+        font-size: 18px;
+      }
+
+      .brand-title {
+        font-family: Georgia, serif;
+        font-size: 20px;
+        font-weight: 700;
+        line-height: 1;
+      }
+
+      .brand-sub {
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1;
+      }
+
+      .control {
+        display: flex;
+        align-items: center;
+        min-height: 48px;
+        padding: 5px;
+      }
+
+      .segmented {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding-right: 5px;
+        border-right: 1px solid var(--line);
+      }
+
+      button {
+        appearance: none;
+        height: 36px;
+        min-width: 40px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--ink);
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: rgba(21, 20, 15, 0.08);
+      }
+
+      button[aria-pressed="true"] {
+        background: var(--ink);
+        color: var(--paper);
+      }
+
+      .reset {
+        min-width: 62px;
+        color: var(--route-dark);
+      }
+
+      .metrics {
+        min-width: 245px;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1px;
+        overflow: hidden;
+      }
+
+      .metric {
+        min-height: 48px;
+        padding: 8px 10px;
+        background: rgba(255, 250, 240, 0.72);
+      }
+
+      .metric span {
+        display: block;
+        color: var(--muted);
+        font-size: 10px;
+        line-height: 1;
+        text-transform: uppercase;
+      }
+
+      .metric strong {
+        display: block;
+        margin-top: 5px;
+        font-size: 15px;
+        line-height: 1;
+      }
+
+      .status {
+        position: fixed;
+        z-index: 800;
+        left: 18px;
+        bottom: 18px;
+        min-width: 220px;
+        max-width: min(420px, calc(100vw - 36px));
+        padding: 10px 12px;
+        font-size: 13px;
+        line-height: 1.35;
+      }
+
+      .directions {
+        position: fixed;
+        z-index: 800;
+        top: 86px;
+        right: 18px;
+        width: min(360px, calc(100vw - 36px));
+        max-height: calc(100vh - 186px);
+        display: flex;
+        flex-direction: column;
+        border: 1px solid rgba(21, 20, 15, 0.16);
+        background: color-mix(in srgb, var(--paper) 94%, transparent);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(14px);
+        pointer-events: auto;
+      }
+
+      .directions-header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 13px 14px 11px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .directions-title {
+        font-family: Georgia, serif;
+        font-size: 18px;
+        font-weight: 700;
+        line-height: 1;
+      }
+
+      .directions-count {
+        color: var(--muted);
+        font-size: 11px;
+        text-transform: uppercase;
+      }
+
+      .step-list {
+        min-height: 86px;
+        margin: 0;
+        padding: 0;
+        overflow: auto;
+        list-style: none;
+      }
+
+      .step {
+        display: grid;
+        grid-template-columns: 34px 1fr auto;
+        gap: 10px;
+        align-items: start;
+        padding: 12px 14px;
+        border-bottom: 1px solid rgba(216, 207, 188, 0.8);
+      }
+
+      .step:last-child {
+        border-bottom: 0;
+      }
+
+      .step-index {
+        width: 25px;
+        height: 25px;
+        display: grid;
+        place-items: center;
+        border-radius: 50%;
+        background: var(--field);
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .step-main {
+        min-width: 0;
+      }
+
+      .step-instruction {
+        font-size: 14px;
+        font-weight: 700;
+        line-height: 1.25;
+      }
+
+      .step-road {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.2;
+        overflow-wrap: anywhere;
+      }
+
+      .step-distance {
+        padding-top: 2px;
+        color: var(--route-dark);
+        font-size: 12px;
+        font-weight: 800;
+        white-space: nowrap;
+      }
+
+      .step-empty {
+        padding: 20px 14px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .status strong {
+        font-family: Georgia, serif;
+      }
+
+      .leaflet-control-zoom {
+        border: 0 !important;
+        box-shadow: var(--shadow) !important;
+      }
+
+      .leaflet-control-zoom a {
+        color: var(--ink) !important;
+      }
+
+      .point-marker {
+        width: 30px;
+        height: 30px;
+        display: grid;
+        place-items: center;
+        border: 2px solid var(--paper);
+        border-radius: 50%;
+        box-shadow: 0 5px 18px rgba(0, 0, 0, 0.3);
+        color: white;
+        font-weight: 800;
+      }
+
+      .point-marker.origin {
+        background: var(--teal);
+      }
+
+      .point-marker.target {
+        background: var(--route);
+      }
+
+      @media (max-width: 760px) {
+        .topbar {
+          grid-template-columns: 1fr;
+          align-items: stretch;
+        }
+
+        .brand,
+        .control,
+        .metrics {
+          width: 100%;
+        }
+
+        .metrics {
+          min-width: 0;
+        }
+
+        .directions {
+          top: auto;
+          right: 18px;
+          bottom: 18px;
+          left: 18px;
+          width: auto;
+          max-height: 38vh;
+        }
+
+        .status {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map" data-testid="route-map"></div>
+    <div class="topbar">
+      <div class="brand" aria-label="Roads RDB">
+        <div class="brand-mark">R</div>
+        <div>
+          <div class="brand-title">Roads RDB</div>
+          <div class="brand-sub">route map</div>
+        </div>
+      </div>
+
+      <div class="control" aria-label="Point controls">
+        <div class="segmented">
+          <button id="originButton" type="button" aria-pressed="true">A</button>
+          <button id="targetButton" type="button" aria-pressed="false">B</button>
+        </div>
+        <button id="resetButton" class="reset" type="button">Reset</button>
+      </div>
+
+      <div class="metrics" aria-live="polite">
+        <div class="metric">
+          <span>Distance</span>
+          <strong id="distanceMetric">-</strong>
+        </div>
+        <div class="metric">
+          <span>Nodes</span>
+          <strong id="nodesMetric">-</strong>
+        </div>
+        <div class="metric">
+          <span>Query</span>
+          <strong id="queryMetric">-</strong>
+        </div>
+      </div>
+    </div>
+
+    <div id="status" class="status" aria-live="polite">
+      <strong>Ready</strong>
+    </div>
+
+    <section class="directions" aria-label="Turn by turn directions">
+      <div class="directions-header">
+        <div class="directions-title">Directions</div>
+        <div id="directionsCount" class="directions-count">No route</div>
+      </div>
+      <ol id="stepList" class="step-list" aria-live="polite">
+        <li class="step-empty">-</li>
+      </ol>
+    </section>
+
+    <script>
+      const map = L.map("map", {
+        zoomControl: false,
+        preferCanvas: true,
+      }).setView([53.65, -2.55], 6);
+
+      L.control.zoom({ position: "bottomright" }).addTo(map);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors | Contains OS data &copy; Crown Copyright and database rights 2026',
+      }).addTo(map);
+
+      const markers = L.layerGroup().addTo(map);
+      const routeLayer = L.layerGroup().addTo(map);
+      const snapLayer = L.layerGroup().addTo(map);
+      const points = { origin: null, target: null };
+      let activePoint = "origin";
+      let routeRequest = null;
+      window.routeMapApp = { map };
+
+      const originButton = document.querySelector("#originButton");
+      const targetButton = document.querySelector("#targetButton");
+      const resetButton = document.querySelector("#resetButton");
+      const status = document.querySelector("#status");
+      const distanceMetric = document.querySelector("#distanceMetric");
+      const nodesMetric = document.querySelector("#nodesMetric");
+      const queryMetric = document.querySelector("#queryMetric");
+      const directionsCount = document.querySelector("#directionsCount");
+      const stepList = document.querySelector("#stepList");
+
+      originButton.addEventListener("click", () => setActivePoint("origin"));
+      targetButton.addEventListener("click", () => setActivePoint("target"));
+      resetButton.addEventListener("click", reset);
+      map.on("click", (event) => {
+        setPoint(activePoint, event.latlng);
+        if (activePoint === "origin" && !points.target) {
+          setActivePoint("target");
+        }
+        if (points.origin && points.target) {
+          drawRoute();
+        }
+      });
+
+      function setActivePoint(next) {
+        activePoint = next;
+        originButton.setAttribute("aria-pressed", String(next === "origin"));
+        targetButton.setAttribute("aria-pressed", String(next === "target"));
+      }
+
+      function setPoint(key, latlng) {
+        points[key] = latlng;
+        renderMarkers();
+        routeLayer.clearLayers();
+        snapLayer.clearLayers();
+        distanceMetric.textContent = "-";
+        nodesMetric.textContent = "-";
+        queryMetric.textContent = "-";
+        renderSteps([]);
+        status.innerHTML = `<strong>${key === "origin" ? "A" : "B"} set</strong>`;
+      }
+
+      function renderMarkers() {
+        markers.clearLayers();
+        if (points.origin) {
+          marker("origin", "A", points.origin).addTo(markers);
+        }
+        if (points.target) {
+          marker("target", "B", points.target).addTo(markers);
+        }
+      }
+
+      function marker(kind, label, latlng) {
+        return L.marker(latlng, {
+          icon: L.divIcon({
+            className: "",
+            html: `<div class="point-marker ${kind}">${label}</div>`,
+            iconSize: [30, 30],
+            iconAnchor: [15, 15],
+          }),
+        });
+      }
+
+      async function drawRoute() {
+        if (routeRequest) {
+          routeRequest.abort();
+        }
+        routeRequest = new AbortController();
+        status.innerHTML = "<strong>Routing</strong>";
+        try {
+          const response = await fetch("/api/route", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              origin: { lat: points.origin.lat, lon: points.origin.lng },
+              target: { lat: points.target.lat, lon: points.target.lng },
+            }),
+            signal: routeRequest.signal,
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload.error || "route failed");
+          }
+          renderRoute(payload);
+        } catch (error) {
+          if (error.name === "AbortError") {
+            return;
+          }
+          routeLayer.clearLayers();
+          snapLayer.clearLayers();
+          renderSteps([]);
+          status.innerHTML = `<strong>No route</strong><br>${escapeText(error.message)}`;
+        }
+      }
+
+      function renderRoute(payload) {
+        routeLayer.clearLayers();
+        snapLayer.clearLayers();
+        if (!payload.coordinates || payload.coordinates.length < 2) {
+          throw new Error("empty route");
+        }
+
+        L.polyline(payload.coordinates, {
+          color: "rgba(84, 37, 29, 0.78)",
+          weight: 9,
+          opacity: 0.8,
+          lineJoin: "round",
+        }).addTo(routeLayer);
+        L.polyline(payload.coordinates, {
+          color: "#d33f2f",
+          weight: 5,
+          opacity: 0.98,
+          lineJoin: "round",
+        }).addTo(routeLayer);
+
+        drawSnap(points.origin, payload.origin_snap);
+        drawSnap(points.target, payload.target_snap);
+        L.circleMarker(payload.origin_snap, {
+          radius: 5,
+          color: "#006b66",
+          fillColor: "#fffaf0",
+          fillOpacity: 1,
+          weight: 2,
+        }).addTo(snapLayer);
+        L.circleMarker(payload.target_snap, {
+          radius: 5,
+          color: "#d33f2f",
+          fillColor: "#fffaf0",
+          fillOpacity: 1,
+          weight: 2,
+        }).addTo(snapLayer);
+
+        distanceMetric.textContent = formatDistance(payload.cost_m);
+        nodesMetric.textContent = String(payload.node_count);
+        queryMetric.textContent = `${payload.elapsed_ms} ms`;
+        renderSteps(payload.steps || []);
+        status.innerHTML =
+          `<strong>${formatDistance(payload.cost_m)}</strong><br>` +
+          `${payload.edge_count} edges, snap ${payload.origin_snap_m} m / ${payload.target_snap_m} m`;
+        const rightPadding = window.innerWidth > 760 ? 390 : 36;
+        map.fitBounds(L.latLngBounds(payload.coordinates), {
+          paddingTopLeft: [36, 104],
+          paddingBottomRight: [rightPadding, 56],
+          maxZoom: 15,
+        });
+      }
+
+      function renderSteps(steps) {
+        stepList.replaceChildren();
+        if (!steps.length) {
+          directionsCount.textContent = "No route";
+          const empty = document.createElement("li");
+          empty.className = "step-empty";
+          empty.textContent = "-";
+          stepList.append(empty);
+          return;
+        }
+
+        directionsCount.textContent = `${steps.length} steps`;
+        steps.forEach((step, index) => {
+          const row = document.createElement("li");
+          row.className = "step";
+
+          const number = document.createElement("div");
+          number.className = "step-index";
+          number.textContent = String(index + 1);
+
+          const main = document.createElement("div");
+          main.className = "step-main";
+
+          const instruction = document.createElement("div");
+          instruction.className = "step-instruction";
+          instruction.textContent = step.instruction || step.road || "Continue";
+
+          const road = document.createElement("div");
+          road.className = "step-road";
+          road.textContent = step.road || "";
+
+          const distance = document.createElement("div");
+          distance.className = "step-distance";
+          distance.textContent = formatDistance(step.distance_m);
+
+          main.append(instruction, road);
+          row.append(number, main, distance);
+          stepList.append(row);
+        });
+      }
+
+      function drawSnap(source, snapLatLng) {
+        L.polyline([source, snapLatLng], {
+          color: "#15140f",
+          weight: 2,
+          opacity: 0.55,
+          dashArray: "5 7",
+        }).addTo(snapLayer);
+      }
+
+      function reset() {
+        if (routeRequest) {
+          routeRequest.abort();
+          routeRequest = null;
+        }
+        points.origin = null;
+        points.target = null;
+        setActivePoint("origin");
+        markers.clearLayers();
+        routeLayer.clearLayers();
+        snapLayer.clearLayers();
+        distanceMetric.textContent = "-";
+        nodesMetric.textContent = "-";
+        queryMetric.textContent = "-";
+        renderSteps([]);
+        status.innerHTML = "<strong>Ready</strong>";
+      }
+
+      function formatDistance(metres) {
+        if (!Number.isFinite(metres)) {
+          return "-";
+        }
+        if (metres >= 1000) {
+          return `${(metres / 1000).toFixed(1)} km`;
+        }
+        return `${Math.round(metres)} m`;
+      }
+
+      function escapeText(value) {
+        return String(value).replace(/[&<>"']/g, (character) => {
+          return {
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#39;",
+          }[character];
+        });
+      }
+
+      function initialiseFromQuery() {
+        const params = new URLSearchParams(window.location.search);
+        const origin = parseLatLng(params.get("from"));
+        const target = parseLatLng(params.get("to"));
+        if (!origin || !target) {
+          return;
+        }
+        points.origin = L.latLng(origin.lat, origin.lng);
+        points.target = L.latLng(target.lat, target.lng);
+        setActivePoint("target");
+        renderMarkers();
+        drawRoute();
+      }
+
+      function parseLatLng(value) {
+        if (!value) {
+          return null;
+        }
+        const parts = value.split(",").map((part) => Number(part.trim()));
+        if (parts.length !== 2 || parts.some((part) => !Number.isFinite(part))) {
+          return null;
+        }
+        return { lat: parts[0], lng: parts[1] };
+      }
+
+      initialiseFromQuery();
+    </script>
+  </body>
+</html>

@@ -2,13 +2,42 @@
 name = "roads-rdb"
 version = "0.1.0"
 description = "Experimental OS Open Roads routing-kernel binary builder and evaluator"
+readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{name = "Robert Pitt"}]
 dependencies = []
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: GIS",
+]
+
+[project.urls]
+Repository = "https://github.com/robertpitt/roads-db"
+Documentation = "https://github.com/robertpitt/roads-db#readme"
+Issues = "https://github.com/robertpitt/roads-db/issues"
 
 [project.scripts]
 roads-rdb = "roads_rdb.cli:main"
+roads-rdb-map = "roads_rdb.map_server:main"
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+include = ["roads_rdb", "roads_rdb.*"]
+namespaces = false
+
+[tool.setuptools.package-data]
+roads_rdb = ["static/*.html"]

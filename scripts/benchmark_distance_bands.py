@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import math
+import os
 import random
 import statistics
 import sys
+import threading
 import time
 from array import array
 from collections import defaultdict
@@ -21,6 +24,7 @@ from roads_rdb.rdb import read_rdb
 
 DEFAULT_PAIRS_PER_BAND = 100
 DEFAULT_PROGRESS_EVERY = 25
+DEFAULT_THREADS = max(1, os.cpu_count() or 1)
 
 
 @dataclass(slots=True)
@@ -40,6 +44,15 @@ class Pair:
     target_node: int
     origin: tuple[float, float]
     target: tuple[float, float]
+    los_m: float
+
+
+@dataclass(slots=True)
+class RouteSample:
+    route_ms: float
+    node_count: int
+    edge_count: int
+    cost_m: float
     los_m: float
 
 
@@ -63,6 +76,12 @@ def main() -> int:
     parser.add_argument("--snap-radius-m", type=float, default=50.0)
     parser.add_argument("--snap-candidates", type=int, default=8)
     parser.add_argument(
+        "--threads",
+        type=int,
+        default=DEFAULT_THREADS,
+        help="route query worker threads; defaults to detected CPU count; use 1 for serial timing",
+    )
+    parser.add_argument(
         "--progress-every",
         type=int,
         default=DEFAULT_PROGRESS_EVERY,
@@ -70,6 +89,8 @@ def main() -> int:
     )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
+    if args.threads < 1:
+        parser.error("--threads must be at least 1")
 
     distances_m = [float(part.strip()) * 1000 for part in args.distances_km.split(",") if part.strip()]
     rng = random.Random(args.seed)
@@ -79,7 +100,6 @@ def main() -> int:
     try:
         started_index = time.perf_counter()
         node_index = build_node_index(graph, args.cell_size_m)
-        workspace = QueryWorkspace(graph.node_count)
         index_s = time.perf_counter() - started_index
         load_s = started_index - started_load
 
@@ -96,7 +116,7 @@ def main() -> int:
                 snap_radius_m=args.snap_radius_m,
                 snap_candidates=args.snap_candidates,
                 progress_every=args.progress_every,
-                workspace=workspace,
+                threads=args.threads,
             )
             bands.append(band)
     finally:
@@ -108,6 +128,7 @@ def main() -> int:
         "load_s": round(load_s, 4),
         "node_index_s": round(index_s, 4),
         "cell_size_m": args.cell_size_m,
+        "threads": args.threads,
         "bands": bands,
     }
 
@@ -115,13 +136,17 @@ def main() -> int:
         print(json.dumps(payload, indent=2))
     else:
         print(f"Loaded RDB in {payload['load_s']}s; built node sampler in {payload['node_index_s']}s")
-        print(f"Nodes: {payload['node_count']:,}; sampler cell size: {args.cell_size_m:g} m")
+        print(
+            f"Nodes: {payload['node_count']:,}; sampler cell size: {args.cell_size_m:g} m; "
+            f"route threads: {args.threads}"
+        )
         print()
         for band in bands:
             print(
                 f"{band['target_km']:>6.0f} km: "
                 f"{band['successes']}/{band['requested_pairs']} routes, "
                 f"sample attempts {band['sample_attempts']}, "
+                f"{band['routes_per_s']} routes/s, "
                 f"median {band['route_ms']['median']} ms, "
                 f"p95 {band['route_ms']['p95']} ms, "
                 f"p99 {band['route_ms']['p99']} ms, "
@@ -157,8 +182,50 @@ def run_band(
     snap_radius_m: float,
     snap_candidates: int,
     progress_every: int,
-    workspace: QueryWorkspace,
+    threads: int,
 ) -> dict:
+    if threads <= 1:
+        return run_band_serial(
+            graph,
+            node_index,
+            rng,
+            distance_m=distance_m,
+            requested_pairs=requested_pairs,
+            tolerance_m=tolerance_m,
+            max_sample_attempts=max_sample_attempts,
+            snap_radius_m=snap_radius_m,
+            snap_candidates=snap_candidates,
+            progress_every=progress_every,
+        )
+    return run_band_threaded(
+        graph,
+        node_index,
+        rng,
+        distance_m=distance_m,
+        requested_pairs=requested_pairs,
+        tolerance_m=tolerance_m,
+        max_sample_attempts=max_sample_attempts,
+        snap_radius_m=snap_radius_m,
+        snap_candidates=snap_candidates,
+        progress_every=progress_every,
+        threads=threads,
+    )
+
+
+def run_band_serial(
+    graph,
+    node_index: NodeIndex,
+    rng: random.Random,
+    *,
+    distance_m: float,
+    requested_pairs: int,
+    tolerance_m: float,
+    max_sample_attempts: int,
+    snap_radius_m: float,
+    snap_candidates: int,
+    progress_every: int,
+) -> dict:
+    workspace = QueryWorkspace(graph.node_count)
     route_times: list[float] = []
     node_counts: list[int] = []
     edge_counts: list[int] = []
@@ -207,15 +274,171 @@ def run_band(
 
     elapsed_s = time.perf_counter() - started_band
 
+    return build_band_payload(
+        distance_m=distance_m,
+        tolerance_m=tolerance_m,
+        requested_pairs=requested_pairs,
+        threads=1,
+        successes=len(route_times),
+        failures=failures,
+        sample_attempts=sample_attempts,
+        elapsed_s=elapsed_s,
+        route_times=route_times,
+        node_counts=node_counts,
+        edge_counts=edge_counts,
+        costs_m=costs_m,
+        los_values=los_values,
+        ratios=ratios,
+    )
+
+
+def run_band_threaded(
+    graph,
+    node_index: NodeIndex,
+    rng: random.Random,
+    *,
+    distance_m: float,
+    requested_pairs: int,
+    tolerance_m: float,
+    max_sample_attempts: int,
+    snap_radius_m: float,
+    snap_candidates: int,
+    progress_every: int,
+    threads: int,
+) -> dict:
+    route_times: list[float] = []
+    node_counts: list[int] = []
+    edge_counts: list[int] = []
+    costs_m: list[float] = []
+    los_values: list[float] = []
+    ratios: list[float] = []
+    failures = 0
+    sample_attempts = 0
+    started_band = time.perf_counter()
+    last_progress_successes = 0
+    worker_count = min(threads, max(1, requested_pairs))
+    thread_state = threading.local()
+
+    def route_pair(pair: Pair) -> RouteSample | None:
+        workspace = getattr(thread_state, "workspace", None)
+        if workspace is None:
+            workspace = QueryWorkspace(graph.node_count)
+            thread_state.workspace = workspace
+
+        started = time.perf_counter()
+        try:
+            route = route_nodes(
+                graph,
+                pair.origin,
+                pair.target,
+                snap_radius_m=snap_radius_m,
+                snap_candidates=snap_candidates,
+                workspace=workspace,
+            )
+        except ValueError:
+            return None
+        return RouteSample(
+            route_ms=(time.perf_counter() - started) * 1000,
+            node_count=len(route.node_ids),
+            edge_count=len(route.edge_ids),
+            cost_m=route.cost_m,
+            los_m=pair.los_m,
+        )
+
+    def submit_next(executor: concurrent.futures.ThreadPoolExecutor, pending: set) -> bool:
+        nonlocal sample_attempts
+        while sample_attempts < max_sample_attempts:
+            sample_attempts += 1
+            pair = sample_pair(node_index, rng, distance_m=distance_m, tolerance_m=tolerance_m)
+            if pair is None:
+                continue
+            pending.add(executor.submit(route_pair, pair))
+            return True
+        return False
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
+        pending: set[concurrent.futures.Future[RouteSample | None]] = set()
+        while len(pending) < worker_count and len(route_times) + len(pending) < requested_pairs:
+            if not submit_next(executor, pending):
+                break
+
+        while pending and len(route_times) < requested_pairs:
+            done, pending = concurrent.futures.wait(
+                pending,
+                return_when=concurrent.futures.FIRST_COMPLETED,
+            )
+            for future in done:
+                sample = future.result()
+                if sample is None:
+                    failures += 1
+                    continue
+                route_times.append(sample.route_ms)
+                node_counts.append(sample.node_count)
+                edge_counts.append(sample.edge_count)
+                costs_m.append(sample.cost_m)
+                los_values.append(sample.los_m)
+                ratios.append(sample.cost_m / sample.los_m if sample.los_m else math.nan)
+
+            if progress_every > 0 and len(route_times) - last_progress_successes >= progress_every:
+                last_progress_successes = len(route_times)
+                elapsed_s = time.perf_counter() - started_band
+                print(
+                    f"{distance_m / 1000:g} km: {len(route_times)}/{requested_pairs} routes "
+                    f"in {elapsed_s:.1f}s using {worker_count} threads",
+                    file=sys.stderr,
+                )
+
+            while len(pending) < worker_count and len(route_times) + len(pending) < requested_pairs:
+                if not submit_next(executor, pending):
+                    break
+
+    elapsed_s = time.perf_counter() - started_band
+    return build_band_payload(
+        distance_m=distance_m,
+        tolerance_m=tolerance_m,
+        requested_pairs=requested_pairs,
+        threads=worker_count,
+        successes=len(route_times),
+        failures=failures,
+        sample_attempts=sample_attempts,
+        elapsed_s=elapsed_s,
+        route_times=route_times,
+        node_counts=node_counts,
+        edge_counts=edge_counts,
+        costs_m=costs_m,
+        los_values=los_values,
+        ratios=ratios,
+    )
+
+
+def build_band_payload(
+    *,
+    distance_m: float,
+    tolerance_m: float,
+    requested_pairs: int,
+    threads: int,
+    successes: int,
+    failures: int,
+    sample_attempts: int,
+    elapsed_s: float,
+    route_times: list[float],
+    node_counts: list[int],
+    edge_counts: list[int],
+    costs_m: list[float],
+    los_values: list[float],
+    ratios: list[float],
+) -> dict:
     return {
         "target_km": distance_m / 1000,
         "tolerance_m": tolerance_m,
         "requested_pairs": requested_pairs,
-        "successes": len(route_times),
+        "threads": threads,
+        "successes": successes,
         "route_failures": failures,
         "sample_attempts": sample_attempts,
         "elapsed_s": round(elapsed_s, 3),
-        "success_rate": round(len(route_times) / sample_attempts, 4) if sample_attempts else None,
+        "routes_per_s": round(successes / elapsed_s, 3) if elapsed_s > 0 else None,
+        "success_rate": round(successes / sample_attempts, 4) if sample_attempts else None,
         "line_of_sight_m": summarise(los_values),
         "route_cost_m": summarise(costs_m),
         "route_to_los_ratio": summarise(ratios),
