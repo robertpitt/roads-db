@@ -1,0 +1,39 @@
+{
+  "name": "Central London",
+  "format_version": 1,
+  "bbox_bng": [
+    520000.0,
+    174000.0,
+    540000.0,
+    188000.0
+  ],
+  "bounds": [
+    [
+      51.45227605004158,
+      -0.27439686215962295
+    ],
+    [
+      51.573491081507356,
+      0.01881212219699591
+    ]
+  ],
+  "source_date": "2026-10-19",
+  "source_url": "https://api.os.uk/downloads/v1/products/OpenRoads/downloads",
+  "source_archive_md5": "2ee5d30899c4a44df321e5e1a66989ac",
+  "attribution": "Contains OS data © Crown Copyright and database rights 2026.",
+  "nodes": 43241,
+  "directed_edges": 112478,
+  "roads": 56392,
+  "components": 44,
+  "files": {
+    "london.rdb": {
+      "bytes": 7212896,
+      "sha256": "8b48f9aa6e6e2b85c9da189029752879ecf85a36404e2f50ae6560650cafad06"
+    },
+    "london.sqlite": {
+      "bytes": 4321280,
+      "sha256": "88dda8fd8938347f9e174ef430f6696118122c7f6c740d44e98782abc95c7d05"
+    }
+  },
+  "id": "8b48f9aa6e6e2b8588dda8fd8938347f"
+}

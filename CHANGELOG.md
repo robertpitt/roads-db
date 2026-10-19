@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add a GitHub Pages London demo: 11.53 MB of real RDB/SQLite data, on-device
+  routing, local road geometry, approximate directions, browser API, offline
+  caching, and a Pages deployment workflow. Include browser/Python parity tests
+  and reproducible bounded-data export with explicit source-ID metadata mappings.
+
 ## 0.1.0 — prepared, unpublished
 
 Initial experimental release of the OS Open Roads routing-kernel builder and

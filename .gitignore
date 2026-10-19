@@ -5,6 +5,8 @@
 *.rdb
 *.sqlite
 *.sqlite-*
+!/demo/data/london.rdb
+!/demo/data/london.sqlite
 
 # Python environments, caches, and distribution output
 .venv/

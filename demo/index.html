@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#163e38">
+  <meta name="description" content="Explore central London with a routing database that runs entirely in your browser.">
+  <title>London, locally — roads-db</title>
+  <link rel="stylesheet" href="vendor/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+  <script src="vendor/leaflet.js" defer></script>
+  <script src="app.js" type="module"></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <header><a class="wordmark" href="https://github.com/robertpitt/roads-db"><span class="monogram">r</span> roads-db <span class="version">LAB / 01</span></a>
+      <p class="eyebrow">THE BROWSER IS THE SERVER</p><h1>London,<br><em>locally.</em></h1>
+      <p class="intro">A small road database. A whole city to explore. Directions calculated on your device.</p>
+    </header>
+    <div id="loadStatus" class="load-status" role="status">Loading London…</div>
+    <p class="scope-note">Experimental graph paths · no one-way or turn restrictions</p>
+    <section class="planner" aria-label="Route planner">
+      <p class="section-label">01 / PICK YOUR JOURNEY</p>
+      <form id="routeForm">
+        <label class="coordinate"><span class="pin">A</span><span>From <input id="from" aria-label="Origin latitude, longitude" value="51.5010,-0.1416" required autocomplete="off"></span></label>
+        <label class="coordinate"><span class="pin destination">B</span><span>To <input id="to" aria-label="Destination latitude, longitude" value="51.5055,-0.0754" required autocomplete="off"></span></label>
+        <div class="actions"><button class="primary" id="routeButton" disabled>Find route <span>↗</span></button><button type="button" id="swapButton" class="secondary" aria-label="Swap origin and destination">⇅</button></div>
+      </form>
+      <p class="hint">Or click the map: first A, then B. Drag either marker to adjust.</p>
+      <div class="presets"><button id="exampleButton" type="button">Palace → Tower Bridge</button><button id="resetButton" type="button">Clear</button></div>
+    </section>
+    <section class="route-details" aria-label="Route results">
+      <div class="tabs"><button id="stepsTab" aria-pressed="true">Directions</button><button id="apiTab" aria-pressed="false">Local API</button></div>
+      <div id="stepsPanel"><p id="emptySteps" class="hint">Your route will appear here.</p><ol id="steps"></ol></div>
+      <div id="apiPanel" hidden><p class="hint">An async JavaScript API in this page. No routing request is sent to a server.</p><pre><code>await roadsDB.route({
+  from: [51.5010, -0.1416],
+  to: [51.5055, -0.0754]
+})</code></pre><button id="copyButton" class="secondary" type="button">Copy response</button><pre id="apiResult">Choose a route to inspect its response.</pre></div>
+    </section>
+    <footer><p><strong>Experimental distance routing.</strong> One-way streets, access rules and turn restrictions are not modelled. Directions are approximate.</p>
+      <a href="data/NOTICE.txt">Data & attribution</a><span> / </span><a href="https://github.com/robertpitt/roads-db">Source on GitHub ↗</a></footer>
+  </aside>
+  <main class="map-wrap">
+    <div id="map" aria-label="Interactive London road map"></div>
+    <div class="map-caption"><span class="live-dot"></span> CENTRAL LONDON <span class="caption-rule"></span><span id="networkStats">RDB + SQLite</span></div>
+    <div class="metrics" aria-live="polite"><div><span>Distance</span><strong id="distance">—</strong></div><div><span>Local query</span><strong id="timing">—</strong></div><div><span>Graph edges</span><strong id="edgeCount">—</strong></div></div>
+    <label class="tile-toggle"><input type="checkbox" id="tiles"> Street-map labels <small>(online)</small></label>
+    <div class="map-note" id="mapNote">Click the map to set A</div>
+  </main>
+</body>
+</html>

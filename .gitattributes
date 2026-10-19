@@ -1,0 +1,2 @@
+# Preserve upstream formatting and collapse third-party code in GitHub diffs.
+demo/vendor/** -whitespace linguist-vendored=true

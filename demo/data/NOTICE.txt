@@ -1,0 +1,4 @@
+Contains OS data © Crown Copyright and database rights 2026.
+OS Open Roads under the Open Government Licence v3.0.
+https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
+Downloaded 2026-10-19; bounded extract, not navigation data.

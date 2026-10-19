@@ -9,6 +9,11 @@ treated as bidirectional. One-way streets, legal access, turn restrictions,
 speed profiles, and traffic are not modelled. The directions are approximate;
 this release is intended for research and distance experiments.
 
+**[Try the London browser demo →](https://robertpitt.github.io/roads-db/)**
+It loads an 11.53 MB central London RDB/SQLite extract, calculates routes in a Web
+Worker, and caches the app and data for offline use. See the
+[demo guide and browser API](docs/PAGES_DEMO.md).
+
 The MVP builds:
 
 ```text
@@ -74,8 +79,9 @@ connection and use OpenStreetMap tiles and unpkg.com respectively.
 3. Keep the supplied licence acknowledgements with the download and any derived
    datasets. See [NOTICE](NOTICE) for the acknowledgement supplied with the 2026 data.
 
-Source data and generated databases are excluded from Git and the Python
-distributions. The reader expects `road_node` and `road_link` tables and
+National source data and generated databases are excluded from Git, with the
+bounded `demo/data/` extract as an explicit exception. The Python distributions
+do not bundle the demo data. The reader expects `road_node` and `road_link` tables and
 EPSG:27700 coordinates; see [database_shape.md](database_shape.md) for the
 observed source schema.
 
