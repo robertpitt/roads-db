@@ -67,8 +67,34 @@
       this.prev = new Int32Array(m.node_count); this.prev.fill(-1);
       this.prevEdge = new Int32Array(m.node_count); this.prevEdge.fill(-1);
       this.settled = new Uint8Array(m.node_count); this.touched = [];
-      this.tiles = new Map();
-      for (let i = 0; i < m.snap_tile_count; i++) this.tiles.set(`${this.snap_tiles[i*4]},${this.snap_tiles[i*4+1]}`, i*4);
+
+    }
+    tile(x,y) {
+      // RDB tiles are sorted by x then y. Avoid millions of Map/string objects.
+      let lo=0,hi=this.meta.snap_tile_count;
+      while(lo<hi){const mid=(lo+hi)>>>1,at=mid*4,tx=this.snap_tiles[at],ty=this.snap_tiles[at+1];
+        if(tx<x||(tx===x&&ty<y))lo=mid+1;else hi=mid;}
+      const at=lo*4;
+      return lo<this.meta.snap_tile_count&&this.snap_tiles[at]===x&&this.snap_tiles[at+1]===y?at:undefined;
+    }
+    networkIds(bounds,limit=10000) {
+      const m=this.meta,b=this.snap_geom_bboxes;
+      const box=bounds.map((v,i)=>(v-(i%2?m.origin_y_m:m.origin_x_m))*m.coord_scale);
+      const intersects=id=>{const i=id*4;return b[i]<=box[2]&&b[i+2]>=box[0]&&b[i+1]<=box[3]&&b[i+3]>=box[1];};
+      const size=m.snap_tile_size_m,minX=Math.floor(bounds[0]/size),maxX=Math.floor(bounds[2]/size),minY=Math.floor(bounds[1]/size),maxY=Math.floor(bounds[3]/size);
+      let ids=[];
+      if((maxX-minX+1)*(maxY-minY+1)<20000){
+        const seen=new Set();for(let x=minX;x<=maxX;x++)for(let y=minY;y<=maxY;y++){
+          const tile=this.tile(x,y);if(tile===undefined)continue;
+          const first=this.snap_tiles[tile+2],end=first+this.snap_tiles[tile+3];
+          for(let j=first;j<end;j++){const id=this.snap_tile_geoms[j];if(intersects(id))seen.add(id);}}
+        ids=[...seen];
+      }else{
+        let count=0;for(let id=0;id<m.snap_geometry_count;id++)if(intersects(id))count++;
+        const stride=Math.max(1,Math.ceil(count/limit));count=0;
+        for(let id=0;id<m.snap_geometry_count;id++)if(intersects(id)&&count++%stride===0)ids.push(id);
+      }
+      const stride=Math.max(1,Math.ceil(ids.length/limit));return ids.filter((_,i)=>i%stride===0);
     }
     xy(node) { return [this.meta.origin_x_m + this.node_x[node]/this.meta.coord_scale,
       this.meta.origin_y_m + this.node_y[node]/this.meta.coord_scale]; }
@@ -82,7 +108,7 @@
       const m = this.meta, tx=Math.floor(point[0]/m.snap_tile_size_m), ty=Math.floor(point[1]/m.snap_tile_size_m);
       const r=Math.max(1,Math.ceil(radius/m.snap_tile_size_m)), ids=new Set(), candidates=[];
       for(let x=tx-r;x<=tx+r;x++) for(let y=ty-r;y<=ty+r;y++) {
-        const tile=this.tiles.get(`${x},${y}`); if(tile===undefined) continue;
+        const tile=this.tile(x,y); if(tile===undefined) continue;
         const first=this.snap_tiles[tile+2], count=this.snap_tiles[tile+3];
         for(let i=first;i<first+count;i++) ids.add(this.snap_tile_geoms[i]);
       }
@@ -122,7 +148,7 @@
         const cost=Math.abs(Math.min(length,roundEven(a.along*this.meta.length_scale))-Math.min(length,roundEven(b.along*this.meta.length_scale)));
         if(!direct||cost<direct.cost)direct={cost,origin:a,target:b};
       }
-      if(!starts.size||!ends.size) throw new Error("Point did not snap to a road. Choose a point inside the London extract.");
+      if(!starts.size||!ends.size) throw new Error("Point did not snap to a road. Choose a point near a road in the selected dataset.");
       const components=new Set([...starts.keys()].map(n=>this.components[n]));
       const shared=new Set([...ends.keys()].map(n=>this.components[n]).filter(c=>components.has(c)));
       if(!shared.size) throw new Error("No route between these disconnected roads");

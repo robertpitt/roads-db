@@ -4,8 +4,9 @@ The source repository is [robertpitt/roads-db](https://github.com/robertpitt/roa
 The v0.1.0 release configuration is prepared. Nothing in the CI workflow
 publishes a GitHub release, pushes Git tags, or uploads to PyPI. Publishing a
 versioned release is a separate maintainer action from pushing source commits.
-The separate Pages workflow publishes the London browser demo on pushes to main;
-see `PAGES_DEMO.md` for dataset and deployment checks.
+The separate Pages workflow publishes the London / Great Britain browser demo on pushes to main;
+see `PAGES_DEMO.md` for dataset and deployment checks. National datasets use separate
+`data-gb-*` releases; these do not publish the v0.1.0 software version.
 
 ## Local release gate
 

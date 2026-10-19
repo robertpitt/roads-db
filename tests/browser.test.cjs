@@ -66,3 +66,21 @@ test('browser geographic conversion agrees with the Python London reference',()=
   assert.ok(Math.abs(geo[0]-(-0.1283539785))<0.00001);
   assert.ok(Math.abs(geo[1]-51.5039908254)<0.00001);
 });
+test('tile binary search and bounded viewport rendering cover the graph',()=>{
+  const graph=readGraph(path.join(root,'demo/data/london.rdb'));
+  for(let i=0;i<graph.meta.snap_tile_count;i++)assert.equal(graph.tile(graph.snap_tiles[i*4],graph.snap_tiles[i*4+1]),i*4);
+  assert.equal(graph.tile(999999,999999),undefined);
+  assert.equal(graph.networkIds([0,0,1,1]).length,0);
+  const box=[520000,174000,540000,188000],ids=graph.networkIds(box,1000);
+  assert.ok(ids.length>0&&ids.length<=1000);
+  for(const id of ids)assert.ok(id<graph.meta.snap_geometry_count);
+});
+test('optional full GB data matches Python local and intercity routing', {skip:!process.env.ROADS_NATIONAL_DATA},()=>{
+  const data=process.env.ROADS_NATIONAL_DATA,graph=readGraph(path.join(data,'gb.rdb'));
+  const manifest=JSON.parse(fs.readFileSync(path.join(data,'manifest.json')));
+  assert.equal(graph.meta.node_count,manifest.nodes);assert.equal(graph.meta.snap_geometry_count,manifest.roads);
+  for(const route of JSON.parse(fs.readFileSync(path.join(data,'parity.json')))){
+    assert.equal(graph.route(route.from_bng,route.to_bng,{radius:250,candidates:8}).cost_m,route.cost_m);
+  }
+  assert.ok(graph.networkIds(manifest.bbox_bng,10000).length<=10000);
+});

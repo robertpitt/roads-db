@@ -1,0 +1,274 @@
+{
+  "name": "Great Britain",
+  "format_version": 1,
+  "bbox_bng": [
+    0,
+    0,
+    700000,
+    1300000
+  ],
+  "bounds": [
+    [
+      49.8,
+      -7.6
+    ],
+    [
+      60.9,
+      1.9
+    ]
+  ],
+  "source_date": "2026-10-19",
+  "source_url": "https://api.os.uk/downloads/v1/products/OpenRoads/downloads",
+  "source_archive_md5": "2ee5d30899c4a44df321e5e1a66989ac",
+  "attribution": "Contains OS data \u00a9 Crown Copyright and database rights 2026.",
+  "coverage": "England, Scotland and Wales. Northern Ireland is not included in OS Open Roads.",
+  "nodes": 3346499,
+  "directed_edges": 7897102,
+  "roads": 3961077,
+  "components": 1022,
+  "metadata_schema": "dictionary-v1",
+  "files": {
+    "gb.rdb": {
+      "bytes": 569517968,
+      "sha256": "99bb7cbe58433073af179e2b446b1f19818c82e292cc5fcc76704d289b8e4b9d",
+      "parts": [
+        {
+          "name": "gb.rdb.000.gz",
+          "bytes": 16777216,
+          "download_bytes": 13933896,
+          "sha256": "40345e2c98052b87219929b7d6d86455ae2ef308a5dffdb23395e8424c3d8d26"
+        },
+        {
+          "name": "gb.rdb.001.gz",
+          "bytes": 16777216,
+          "download_bytes": 13582911,
+          "sha256": "9c86e04784f2a9ba3e4b25fa3a2a026f55eed834c26221321965f8d306121c16"
+        },
+        {
+          "name": "gb.rdb.002.gz",
+          "bytes": 16777216,
+          "download_bytes": 13742984,
+          "sha256": "b372c93c81ae1266483a0ba1a503923ed0955f7ef1dd61ccb2ca514bdead40d2"
+        },
+        {
+          "name": "gb.rdb.003.gz",
+          "bytes": 16777216,
+          "download_bytes": 10222873,
+          "sha256": "769d0f5aa580b492f592d2314aa73499be9cfa2c5954b3d4201e6eef781a3b74"
+        },
+        {
+          "name": "gb.rdb.004.gz",
+          "bytes": 16777216,
+          "download_bytes": 6627455,
+          "sha256": "de1aafabb14ffda4eb59900e484c88849838229e811cee27f2eeb1c440632b86"
+        },
+        {
+          "name": "gb.rdb.005.gz",
+          "bytes": 16777216,
+          "download_bytes": 11326428,
+          "sha256": "b76f2219d293f220ed0cde988357e8d1fb64f5039a8687f875a23f67c56400fb"
+        },
+        {
+          "name": "gb.rdb.006.gz",
+          "bytes": 16777216,
+          "download_bytes": 13982062,
+          "sha256": "e6c73694bcf71329c291270bdc15e5b7b88f29ba0e97f03585fd5b16cbb51044"
+        },
+        {
+          "name": "gb.rdb.007.gz",
+          "bytes": 16777216,
+          "download_bytes": 7830222,
+          "sha256": "89b1c149fe339419189189125fecd7163419540cd7bb799117a0f4718ec32be1"
+        },
+        {
+          "name": "gb.rdb.008.gz",
+          "bytes": 16777216,
+          "download_bytes": 11500124,
+          "sha256": "fb5fe9ac1fc18dfdf97d172371b328a6620aac33b42131bea15db9b9d65bac22"
+        },
+        {
+          "name": "gb.rdb.009.gz",
+          "bytes": 16777216,
+          "download_bytes": 11747945,
+          "sha256": "c4dfc222f134a0162e16fd1068870c186caf90c73a1ec596924006c7916a5a10"
+        },
+        {
+          "name": "gb.rdb.010.gz",
+          "bytes": 16777216,
+          "download_bytes": 11749135,
+          "sha256": "dacd18ef665b1cb25c5cc61bca3a41589aae146d526a32f49917b17945f1bcdd"
+        },
+        {
+          "name": "gb.rdb.011.gz",
+          "bytes": 16777216,
+          "download_bytes": 11750223,
+          "sha256": "a02766b05083d15cbbec2030bfbf297696e719a644fe54c08388f65cc8f532ce"
+        },
+        {
+          "name": "gb.rdb.012.gz",
+          "bytes": 16777216,
+          "download_bytes": 11746639,
+          "sha256": "3f239ce67ab260a4c643133d3db0c890b2b0ce9c4a016efb7f7afdf9d63ba5ef"
+        },
+        {
+          "name": "gb.rdb.013.gz",
+          "bytes": 16777216,
+          "download_bytes": 12312266,
+          "sha256": "636fb3510276ac67bc27aa7543abfec668abaf07ad75be8a52524a4e2b8b70c0"
+        },
+        {
+          "name": "gb.rdb.014.gz",
+          "bytes": 16777216,
+          "download_bytes": 13683453,
+          "sha256": "e9b058156d830c00a9e9b18977238b7a5a3c1e206292c3fe02a38881a802832f"
+        },
+        {
+          "name": "gb.rdb.015.gz",
+          "bytes": 16777216,
+          "download_bytes": 13683163,
+          "sha256": "33ec7483cc16c18667059258de79ba5efec86bd6a08cc681e4859418c2610602"
+        },
+        {
+          "name": "gb.rdb.016.gz",
+          "bytes": 16777216,
+          "download_bytes": 13684269,
+          "sha256": "44f278558941961da766d7354fe9267a10c4140a4a61f36d80da5fceb34eb0e4"
+        },
+        {
+          "name": "gb.rdb.017.gz",
+          "bytes": 16777216,
+          "download_bytes": 9699468,
+          "sha256": "d4c3dfd06a4a6a4ae7705932b919125a2d94dda6f9194ffea1ea9741c4529b22"
+        },
+        {
+          "name": "gb.rdb.018.gz",
+          "bytes": 16777216,
+          "download_bytes": 9007633,
+          "sha256": "09b817f52ebd4be1c4e0c63e646512153d28f3a817c9d5fecf7d4d719d253f83"
+        },
+        {
+          "name": "gb.rdb.019.gz",
+          "bytes": 16777216,
+          "download_bytes": 11327050,
+          "sha256": "e7a062351b5f448159c8bcf1507846d53e1ef96cfdaf4fa0b3df7c6584d99fe1"
+        },
+        {
+          "name": "gb.rdb.020.gz",
+          "bytes": 16777216,
+          "download_bytes": 11330803,
+          "sha256": "636ab3df3dc640990efa0bcf8df35f13c9f1875d5d047780dff510b8acb51ddc"
+        },
+        {
+          "name": "gb.rdb.021.gz",
+          "bytes": 16777216,
+          "download_bytes": 11336972,
+          "sha256": "045b93a799e6840734e0f603273b23206a4e8f109cf2ce40b9a74521fe8133a5"
+        },
+        {
+          "name": "gb.rdb.022.gz",
+          "bytes": 16777216,
+          "download_bytes": 11329235,
+          "sha256": "3cccbb858a76109a50e7c245815cd72d3fd9310ead48acd82769412e8e25fedf"
+        },
+        {
+          "name": "gb.rdb.023.gz",
+          "bytes": 16777216,
+          "download_bytes": 11332526,
+          "sha256": "8a06eeb1541fe7e30ef53fdfc85241e72002838c73597c16e8355e47785feb4d"
+        },
+        {
+          "name": "gb.rdb.024.gz",
+          "bytes": 16777216,
+          "download_bytes": 11333233,
+          "sha256": "b1042af323bb30b72d2fb97d9b80d6a7d305b7207b6ccb2c502ad7c719129ec0"
+        },
+        {
+          "name": "gb.rdb.025.gz",
+          "bytes": 16777216,
+          "download_bytes": 11333572,
+          "sha256": "c57d19f5fffac9e647a3f231193167327e230da59a59f4c56bfa8ab19e3a6b49"
+        },
+        {
+          "name": "gb.rdb.026.gz",
+          "bytes": 16777216,
+          "download_bytes": 11332125,
+          "sha256": "6c841023bcaeb806802d7ce8121532ee32a732ee4c95e4d943f862f2b8c62c90"
+        },
+        {
+          "name": "gb.rdb.027.gz",
+          "bytes": 16777216,
+          "download_bytes": 11336780,
+          "sha256": "839258c4d106102fd708cf9339851939e994da511ee5de3fafba1de572d64b9f"
+        },
+        {
+          "name": "gb.rdb.028.gz",
+          "bytes": 16777216,
+          "download_bytes": 11337616,
+          "sha256": "697f034eb4c33cdf8d5a892663bac4b4371d31018d4950f53cde169ed0e083d0"
+        },
+        {
+          "name": "gb.rdb.029.gz",
+          "bytes": 16777216,
+          "download_bytes": 5021136,
+          "sha256": "0019d0bade1fe621b2f0b7667d7a4bf6aadca2fecfbdc5edb897f38ec530b1a6"
+        },
+        {
+          "name": "gb.rdb.030.gz",
+          "bytes": 16777216,
+          "download_bytes": 5287647,
+          "sha256": "83920fef7aa4b04f37a6164a3dd5da953d8eaa04ba44cd9679381a46e2fe9194"
+        },
+        {
+          "name": "gb.rdb.031.gz",
+          "bytes": 16777216,
+          "download_bytes": 8014150,
+          "sha256": "be5565128f2eb2f5230a5fa5c2f634409357c1831568ee03b68bd396bf8ba175"
+        },
+        {
+          "name": "gb.rdb.032.gz",
+          "bytes": 16777216,
+          "download_bytes": 10322435,
+          "sha256": "1fb1ad7bab1315f464e9363d82ab12ee91a7674fee534f4f5cd6b1919a1857cb"
+        },
+        {
+          "name": "gb.rdb.033.gz",
+          "bytes": 15869840,
+          "download_bytes": 1510251,
+          "sha256": "4ed80387348d1f2cedf20185f0032695d256ce3b63efbaf4254422d02e5d5900"
+        }
+      ]
+    },
+    "gb.sqlite": {
+      "bytes": 63377408,
+      "sha256": "cf3550bab5175610913171a32adfdc44944c5c1e12f882522fcd45b83d7aec31",
+      "parts": [
+        {
+          "name": "gb.sqlite.000.gz",
+          "bytes": 16777216,
+          "download_bytes": 6528657,
+          "sha256": "65e942f0f49a42a8477780fa7a99ca1a7bb440695a189d283945e962f5024e78"
+        },
+        {
+          "name": "gb.sqlite.001.gz",
+          "bytes": 16777216,
+          "download_bytes": 9853082,
+          "sha256": "480a4bf379f253fb5e7e4796014bcce72ea6a64916e3c325c4f456f172e86765"
+        },
+        {
+          "name": "gb.sqlite.002.gz",
+          "bytes": 16777216,
+          "download_bytes": 9872364,
+          "sha256": "5a3c2373d70b1aa604f1af1a7143e10497011a1c3e9c7cf7067fba6164d5195a"
+        },
+        {
+          "name": "gb.sqlite.003.gz",
+          "bytes": 13045760,
+          "download_bytes": 7537651,
+          "sha256": "c81076faf06bd9394e5375d38d4945e595b226083833781495330c74907fa4e0"
+        }
+      ]
+    }
+  },
+  "release": "data-gb-2026-10-19",
+  "id": "99bb7cbe58433073cf3550bab5175610"
+}

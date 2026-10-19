@@ -4,20 +4,29 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#163e38">
-  <meta name="description" content="Explore central London with a routing database that runs entirely in your browser.">
-  <title>London, locally — roads-db</title>
+  <meta name="description" content="Explore London or Great Britain with routing databases saved in your browser.">
+  <title>Roads, locally — roads-db</title>
   <link rel="stylesheet" href="vendor/leaflet.css">
   <link rel="stylesheet" href="style.css">
   <script src="vendor/leaflet.js" defer></script>
+  <script src="storage.js"></script>
   <script src="app.js" type="module"></script>
 </head>
 <body>
   <aside class="sidebar">
     <header><a class="wordmark" href="https://github.com/robertpitt/roads-db"><span class="monogram">r</span> roads-db <span class="version">LAB / 01</span></a>
-      <p class="eyebrow">THE BROWSER IS THE SERVER</p><h1>London,<br><em>locally.</em></h1>
-      <p class="intro">A small road database. A whole city to explore. Directions calculated on your device.</p>
+      <p class="eyebrow">THE BROWSER IS THE SERVER</p><h1>Roads,<br><em>locally.</em></h1>
+      <p class="intro">A city or a country. Download once, explore locally. Directions calculated on your device.</p>
     </header>
-    <div id="loadStatus" class="load-status" role="status">Loading London…</div>
+    <section class="dataset-picker" aria-label="Dataset selection">
+      <label for="dataset">YOUR ROAD DATABASE</label>
+      <select id="dataset"><option value="london">Central London</option><option value="gb">Great Britain</option></select>
+      <p class="hint" id="datasetInfo">Checking saved data…</p>
+      <button type="button" id="loadDataset" class="primary" hidden>Download dataset</button>
+      <div class="storage-actions"><button id="forgetDataset" type="button" hidden>Remove saved dataset</button><span id="storagePolicy"></span></div>
+      <progress id="downloadProgress" max="1" value="0" hidden aria-label="Dataset loading progress"></progress>
+    </section>
+    <div id="loadStatus" class="load-status" role="status">Checking datasets…</div>
     <p class="scope-note">Experimental graph paths · no one-way or turn restrictions</p>
     <section class="planner" aria-label="Route planner">
       <p class="section-label">01 / PICK YOUR JOURNEY</p>
@@ -38,11 +47,11 @@
 })</code></pre><button id="copyButton" class="secondary" type="button">Copy response</button><pre id="apiResult">Choose a route to inspect its response.</pre></div>
     </section>
     <footer><p><strong>Experimental distance routing.</strong> One-way streets, access rules and turn restrictions are not modelled. Directions are approximate.</p>
-      <a href="data/NOTICE.txt">Data & attribution</a><span> / </span><a href="https://github.com/robertpitt/roads-db">Source on GitHub ↗</a></footer>
+      <a id="dataNotice" href="data/NOTICE.txt">Data & attribution</a><span> / </span><a href="https://github.com/robertpitt/roads-db">Source on GitHub ↗</a></footer>
   </aside>
   <main class="map-wrap">
-    <div id="map" aria-label="Interactive London road map"></div>
-    <div class="map-caption"><span class="live-dot"></span> CENTRAL LONDON <span class="caption-rule"></span><span id="networkStats">RDB + SQLite</span></div>
+    <div id="map" aria-label="Interactive local road map"></div>
+    <div class="map-caption"><span class="live-dot"></span> <span id="datasetCaption">CENTRAL LONDON</span> <span class="caption-rule"></span><span id="networkStats">RDB + SQLite</span></div>
     <div class="metrics" aria-live="polite"><div><span>Distance</span><strong id="distance">—</strong></div><div><span>Local query</span><strong id="timing">—</strong></div><div><span>Graph edges</span><strong id="edgeCount">—</strong></div></div>
     <label class="tile-toggle"><input type="checkbox" id="tiles"> Street-map labels <small>(online)</small></label>
     <div class="map-note" id="mapNote">Click the map to set A</div>

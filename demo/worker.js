@@ -1,33 +1,21 @@
 /* Local-only routing worker: no routing service or API key. */
-importScripts("vendor/proj4.js", "vendor/sql-wasm.js", "engine.js");
+importScripts("vendor/proj4.js", "vendor/sql-wasm.js", "engine.js", "storage.js");
 proj4.defs("EPSG:27700", "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +towgs84=446.448,-125.157,542.060,0.1502,0.2470,0.8421,-20.4894 +units=m +no_defs");
 const projection=proj4("EPSG:4326","EPSG:27700");
-let graph,db,manifest;
+let graph,db,manifest,majorIds;
 const geographic=p=>{const [lon,lat]=projection.inverse(p);return [lat,lon];};
 
-async function initialise(progress) {
-  const response=await fetch("data/manifest.json",{cache:"no-cache"});
-  if(!response.ok)throw new Error("London dataset manifest is unavailable");
-  manifest=await response.json();
-  const cache=await caches.open(`roads-db-data:${new URL(".",self.location).pathname}:${manifest.id}`);
-  async function load(name) {
-    const url=new URL(`data/${name}`,self.location).href;
-    let response=await cache.match(url);
-    if(!response){progress(`Downloading ${name}`);response=await fetch(url);}
-    if(!response.ok)throw new Error(`Unable to load ${name}`);
-    const buffer=await response.arrayBuffer();
-    const hash=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",buffer)),x=>x.toString(16).padStart(2,"0")).join("");
-    if(hash!==manifest.files[name].sha256){await cache.delete(url);throw new Error(`Checksum mismatch for ${name}. Reload to retry.`);}
-    await cache.put(url,new Response(buffer));
-    return buffer;
-  }
-  progress("Loading routing graph and SQLite");
-  const [rdb,sqlite,SQL]=await Promise.all([load("london.rdb"),load("london.sqlite"),
-    initSqlJs({locateFile:name=>new URL(`vendor/${name}`,self.location).href})]);
-  graph=new RoadsGraph(rdb);db=new SQL.Database(new Uint8Array(sqlite));
-  if(db.exec("SELECT count(*) FROM roads")[0].values[0][0]!==manifest.roads || graph.meta.node_count!==manifest.nodes)
-    throw new Error("Mismatched London dataset files");
-  return manifest;
+async function initialise(dataset,progress) {
+  manifest=await RoadsStorage.manifest(dataset);
+  const {files,downloaded}=await RoadsStorage.load(dataset,manifest,progress);
+  progress({stage:"Opening routing graph and SQLite"});
+  graph=new RoadsGraph(files[dataset==="gb"?"gb.rdb":"london.rdb"]);
+  const SQL=await initSqlJs({locateFile:name=>new URL(`vendor/${name}`,self.location).href});
+  db=new SQL.Database(new Uint8Array(files[dataset==="gb"?"gb.sqlite":"london.sqlite"]));
+  const table=manifest.metadata_schema==="dictionary-v1"?"road_labels":"roads";
+  if(db.exec(`SELECT count(*) FROM ${table}`)[0].values[0][0]!==manifest.roads || graph.meta.node_count!==manifest.nodes)
+    throw new Error("Mismatched dataset files");
+  return {...manifest,downloaded_bytes:downloaded};
 }
 
 function directions(request) {
@@ -37,7 +25,7 @@ function directions(request) {
   }
   const from=projection.forward([request.from[1],request.from[0]]),to=projection.forward([request.to[1],request.to[0]]);
   const bounds=manifest.bbox_bng;
-  if([from,to].some(p=>p[0]<bounds[0]||p[0]>bounds[2]||p[1]<bounds[1]||p[1]>bounds[3]))throw new Error("Both points must be inside the London extract");
+  if([from,to].some(p=>p[0]<bounds[0]||p[0]>bounds[2]||p[1]<bounds[1]||p[1]>bounds[3]))throw new Error("Both points must be inside the selected dataset");
   const route=graph.route(from,to,{radius:250,candidates:8});
   const routingMs=performance.now()-started,segments=[];
   function partial(snap,node,reverse=false) {
@@ -103,10 +91,21 @@ function directions(request) {
 self.onmessage=async({data:{id,method,payload}})=>{
   try{
     let result;
-    if(method==="init")result=await initialise(stage=>postMessage({type:"progress",stage}));
+    if(method==="init")result=await initialise(payload.dataset,progress=>postMessage({type:"progress",...progress}));
     else if(!graph)throw new Error("Dataset is still loading");
     else if(method==="route")result=directions(payload);
-    else if(method==="network")result=Array.from({length:graph.meta.snap_geometry_count},(_,id)=>graph.geometry(id).map(geographic));
+    else if(method==="network"){
+      const corners=payload.bounds.flatMap(lat=>payload.longitudes.map(lon=>projection.forward([lon,lat])));
+      const bounds=[Math.min(...corners.map(p=>p[0])),Math.min(...corners.map(p=>p[1])),Math.max(...corners.map(p=>p[0])),Math.max(...corners.map(p=>p[1]))];
+      let ids;
+      if(manifest.metadata_schema==="dictionary-v1"&&payload.zoom<12){
+        if(!majorIds)majorIds=db.exec("SELECT geom_id FROM roads WHERE classification IN ('Motorway','A Road')")[0]?.values.map(row=>row[0])||[];
+        const m=graph.meta,b=graph.snap_geom_bboxes,box=bounds.map((v,i)=>(v-(i%2?m.origin_y_m:m.origin_x_m))*m.coord_scale);
+        ids=majorIds.filter(id=>{const i=id*4;return b[i]<=box[2]&&b[i+2]>=box[0]&&b[i+1]<=box[3]&&b[i+3]>=box[1];});
+        const stride=Math.max(1,Math.ceil(ids.length/30000));ids=ids.filter((_,i)=>i%stride===0);
+      }else ids=graph.networkIds(bounds,30000);
+      result=ids.map(id=>{const points=graph.geometry(id);return (payload.zoom<10?[points[0],points.at(-1)]:points).map(geographic);});
+    }
     else throw new Error("Unknown API method");
     postMessage({id,result});
   }catch(error){postMessage({id,error:error.message});}

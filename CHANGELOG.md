@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add selectable Great Britain coverage, a 399.09 MB compressed national data
+  edition, resumable verified downloads, per-dataset browser caching, persistent
+  storage requests and controls, bounded map rendering, national routing parity
+  and cache failure tests. Serve national chunks through Pages from a data release
+  without adding them to Git history. OS coverage excludes Northern Ireland.
+
 - Add a GitHub Pages London demo: 11.53 MB of real RDB/SQLite data, on-device
   routing, local road geometry, approximate directions, browser API, offline
   caching, and a Pages deployment workflow. Include browser/Python parity tests

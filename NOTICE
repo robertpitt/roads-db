@@ -3,7 +3,10 @@ License; see LICENSE.
 
 OS Open Roads is a separate Ordnance Survey dataset. The Python distributions
 contain no OS dataset. The repository's demo/data directory contains a bounded
-London RDB/SQLite extract with its own NOTICE.txt. Use of OS OpenData is subject to the Open
+London RDB/SQLite extract and Great Britain dataset manifests, with per-dataset
+NOTICE.txt files. National database chunks are distributed in separate data
+releases and served by the browser demo. OS Open Roads excludes Northern Ireland.
+Use of OS OpenData is subject to the Open
 Government Licence v3.0 and the acknowledgements supplied with the dataset:
 https://os.uk/opendata/licence
 https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/

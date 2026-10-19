@@ -9,9 +9,10 @@ treated as bidirectional. One-way streets, legal access, turn restrictions,
 speed profiles, and traffic are not modelled. The directions are approximate;
 this release is intended for research and distance experiments.
 
-**[Try the London browser demo →](https://robertpitt.github.io/roads-db/)**
-It loads an 11.53 MB central London RDB/SQLite extract, calculates routes in a Web
-Worker, and caches the app and data for offline use. See the
+**[Try the local-first browser demo →](https://robertpitt.github.io/roads-db/)**
+Choose central London (11.53 MB) or Great Britain (399.09 MB compressed). Routes
+run in a Web Worker; verified downloads stay in browser storage for offline reuse.
+Great Britain covers England, Scotland and Wales, excluding Northern Ireland. See the
 [demo guide and browser API](docs/PAGES_DEMO.md).
 
 The MVP builds:

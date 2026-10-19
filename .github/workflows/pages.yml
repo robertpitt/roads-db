@@ -1,4 +1,4 @@
-name: London demo / GitHub Pages
+name: Browser demo / GitHub Pages
 
 on:
   push:
@@ -16,7 +16,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
       pages: read
@@ -30,10 +30,14 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
-      - name: Test the browser engine against Python and London data
-        run: node --test tests/browser.test.cjs
+      - name: Test routing and persistent dataset downloads
+        run: node --test tests/*.test.cjs
       - name: Validate data and prepare static app
-        run: python scripts/prepare_pages.py
+        run: python scripts/prepare_pages.py --download-national --materialize-national
+      - name: Check full Great Britain routing against Python reference costs
+        run: node --test --test-name-pattern="optional full GB" tests/browser.test.cjs
+        env:
+          ROADS_NATIONAL_DATA: build/national
       - name: Configure Pages
         if: github.ref == 'refs/heads/main'
         uses: actions/configure-pages@v5
@@ -53,6 +57,6 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Deploy London demo
+      - name: Deploy browser demo
         id: deployment
         uses: actions/deploy-pages@v4

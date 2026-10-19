@@ -1,10 +1,9 @@
 import {createRoadsClient} from "./api.js";
 const $=id=>document.getElementById(id),status=$("loadStatus");
-const client=createRoadsClient({onProgress:text=>status.textContent=text});
-window.roadsDB=client;
+let client,manifest,selection=0,networkSequence=0;
 const map=L.map("map",{zoomControl:false,preferCanvas:true}).setView([51.51,-0.12],13);
 L.control.zoom({position:"bottomright"}).addTo(map);
-const markers=L.layerGroup().addTo(map),routeLayer=L.layerGroup().addTo(map);
+const markers=L.layerGroup().addTo(map),routeLayer=L.layerGroup().addTo(map),networkLayer=L.layerGroup().addTo(map),boundsLayer=L.layerGroup().addTo(map);
 const tiles=L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'});
 $("tiles").onchange=()=>$("tiles").checked?tiles.addTo(map):map.removeLayer(tiles);
 let ready=false,next="from",sequence=0,lastResponse=null;
@@ -35,24 +34,85 @@ async function route(){
 $("routeForm").onsubmit=event=>{event.preventDefault();route();};
 $("swapButton").onclick=()=>{[$("from").value,$("to").value]=[$("to").value,$("from").value];route();};
 $("resetButton").onclick=()=>{sequence++;clearResult();markers.clearLayers();$("from").value="";$("to").value="";next="from";$("emptySteps").textContent="Your route will appear here.";$("mapNote").textContent="Click the map to set A";};
-$("exampleButton").onclick=()=>{$("from").value="51.5010,-0.1416";$("to").value="51.5055,-0.0754";route();};
+$("exampleButton").onclick=()=>{
+  const gb=$("dataset").value==="gb";
+  $("from").value=gb?"53.4808,-2.2426":"51.5010,-0.1416";$("to").value=gb?"53.8008,-1.5491":"51.5055,-0.0754";route();
+};
 map.on("click",event=>{if(!ready)return;sequence++;clearResult();$(next).value=`${event.latlng.lat.toFixed(6)},${event.latlng.lng.toFixed(6)}`;next=next==="from"?"to":"from";placeMarkers();$("mapNote").textContent=`Click the map to set ${next==="from"?"A":"B"}`;if($("from").value&&$("to").value)route();});
 for(const active of["steps","api"])$(active+"Tab").onclick=()=>{for(const key of["steps","api"]){$(key+"Tab").setAttribute("aria-pressed",String(key===active));$(key+"Panel").hidden=key!==active;}};
 $("copyButton").onclick=async()=>{if(!lastResponse)return;try{await navigator.clipboard.writeText(JSON.stringify(lastResponse,null,2));$("copyButton").textContent="Copied";}catch{$("copyButton").textContent="Select and copy the response below";}};
-let offlineReady=false;
-function connectivity(){if(ready){status.textContent=`${navigator.onLine?"On-device routing":"Offline routing"} · ${offlineReady?"saved for offline use":"saving offline app…"}`;status.className="load-status ready";}}
+let offlineReady=false,storagePersistent=false;
+const mb=bytes=>`${(bytes/1e6).toFixed(1)} MB`;
+function connectivity(){if(ready){status.textContent=`${navigator.onLine?"On-device routing":"Offline routing"} · ${offlineReady?"app and data saved":"data saved · saving offline app…"}`;status.className="load-status ready";}}
 window.addEventListener("online",connectivity);window.addEventListener("offline",connectivity);
-const offline="serviceWorker" in navigator?navigator.serviceWorker.register("sw.js").then(()=>navigator.serviceWorker.ready).then(()=>{offlineReady=true;connectivity();}).catch(()=>{}):Promise.resolve();
-try{
-  const manifest=await client.ready;
-  map.attributionControl.addAttribution(manifest.attribution);
-  map.fitBounds(manifest.bounds,{padding:[30,30]});
-  L.rectangle(manifest.bounds,{color:"#80977d",weight:1,dashArray:"6 5",fill:false,interactive:false}).addTo(map);
-  $("networkStats").textContent=`${manifest.roads.toLocaleString()} roads · ${(Object.values(manifest.files).reduce((s,f)=>s+f.bytes,0)/1e6).toFixed(1)} MB`;
-  status.textContent="Drawing the local road network…";
-  const network=await client.network();L.polyline(network,{color:"#abb6a4",weight:1.1,opacity:.85,interactive:false,smoothFactor:1.5}).addTo(map).bringToBack();
-  for(const [label,point]of[["WESTMINSTER",[51.497,-.13]],["SOHO",[51.514,-.135]],["CITY OF LONDON",[51.515,-.09]],["SOUTHWARK",[51.499,-.087]],["CAMDEN",[51.539,-.143]]])L.marker(point,{interactive:false,icon:L.divIcon({className:"landmark",html:label,iconSize:[130,15]})}).addTo(map);
-  ready=true;$("routeButton").disabled=false;connectivity();
-  const params=new URLSearchParams(location.search);if(params.has("from"))$("from").value=params.get("from");if(params.has("to"))$("to").value=params.get("to");
-  await route();
-}catch(error){status.textContent=`Unable to load London: ${error.message}`;status.className="load-status error";$("mapNote").textContent="Reload to retry the dataset download";}
+if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").then(()=>navigator.serviceWorker.ready).then(()=>{offlineReady=true;connectivity();}).catch(()=>{});
+async function storagePolicy(){
+  try{storagePersistent=await navigator.storage?.persisted?.()||false;}catch{storagePersistent=false;}
+  $("storagePolicy").textContent=storagePersistent?"Protected browser storage":"Browser may reclaim storage";
+}
+async function drawNetwork(){
+  if(!ready)return;const current=client,id=++networkSequence,b=map.getBounds();
+  try{
+    const lines=await current.network({bounds:[b.getSouth(),b.getNorth()],longitudes:[b.getWest(),b.getEast()],zoom:map.getZoom()});
+    if(id!==networkSequence||current!==client)return;
+    networkLayer.clearLayers();L.polyline(lines,{color:"#abb6a4",weight:1.1,opacity:.85,interactive:false,smoothFactor:1.5}).addTo(networkLayer).bringToBack();
+  }catch{}
+}
+let moveTimer;map.on("moveend",()=>{clearTimeout(moveTimer);moveTimer=setTimeout(drawNetwork,180);});
+async function chooseDataset(auto=true){
+  const current=++selection,dataset=$("dataset").value;
+  sequence++;networkSequence++;ready=false;client?.close();client=null;window.roadsDB=null;
+  clearResult();markers.clearLayers();networkLayer.clearLayers();boundsLayer.clearLayers();
+  $("routeButton").disabled=true;$("loadDataset").hidden=true;$("forgetDataset").hidden=true;$("downloadProgress").hidden=true;
+  status.className="load-status";status.textContent="Checking saved data…";
+  $("dataNotice").href=dataset==="gb"?"data/gb/NOTICE.txt":"data/NOTICE.txt";
+  $("datasetCaption").textContent=dataset==="gb"?"GREAT BRITAIN":"CENTRAL LONDON";
+  $("exampleButton").textContent=dataset==="gb"?"Manchester → Leeds":"Palace → Tower Bridge";
+  try{
+    const meta=await RoadsStorage.manifest(dataset);if(current!==selection)return;manifest=meta;
+    const saved=await RoadsStorage.inspect(dataset,meta);if(current!==selection)return;
+    $("datasetInfo").textContent=dataset==="gb"?`England, Scotland & Wales; excludes Northern Ireland. ${mb(saved.total)} download, ${mb(Object.values(meta.files).reduce((n,f)=>n+f.bytes,0))} expanded. Desktop recommended; allow about 1.5 GB of memory.`:`Central London · ${mb(saved.total)} download.`;
+    $("networkStats").textContent=`${meta.roads.toLocaleString()} roads · ${mb(saved.total)}`;
+    map.fitBounds(meta.bounds,{padding:[30,30]});
+    $("forgetDataset").hidden=!saved.cached;
+    $("loadDataset").textContent=saved.complete?"Load saved dataset":saved.cached?`Resume download (${mb(saved.total-saved.cached)} left)`:`Download ${meta.name} (${mb(saved.total)})`;
+    $("mapNote").textContent=saved.complete?"Dataset saved on this device":"Download this dataset to start routing";
+    status.textContent=saved.complete?"Saved locally · no data download needed":saved.cached?`${mb(saved.cached)} saved · ready to resume`:"Ready for first download";
+    $("loadDataset").hidden=false;
+    if(auto&&(saved.complete||dataset==="london"))await loadDataset(current);
+  }catch(error){if(current===selection){status.textContent=error.message;status.className="load-status error";}}
+}
+async function loadDataset(current=selection){
+  if(current!==selection||!manifest)return;
+  const dataset=$("dataset").value;
+  $("loadDataset").hidden=true;$("downloadProgress").hidden=false;$("downloadProgress").value=0;status.className="load-status";
+  try{
+    // Request protection on the page: persist() is unavailable in workers.
+    await navigator.storage?.persist?.();await storagePolicy();
+    const saved=await RoadsStorage.inspect(dataset,manifest),estimate=await navigator.storage?.estimate?.();
+    if(estimate?.quota&&estimate.quota-estimate.usage<(saved.total-saved.cached)*1.1)throw new Error("Not enough browser storage. Free space or choose London.");
+    if(current!==selection)return;
+    client=createRoadsClient({dataset,onProgress:progress=>{
+      if(current!==selection)return;
+      status.textContent=progress.total?`${progress.stage} · ${mb(progress.complete)} / ${mb(progress.total)}`:progress.stage;
+      if(progress.total)$("downloadProgress").value=progress.complete/progress.total;
+    }});window.roadsDB=client;
+    const meta=await client.ready;if(current!==selection)return;
+    ready=true;try{localStorage.setItem("roads-db-dataset",dataset);}catch{}
+    $("downloadProgress").hidden=true;$("forgetDataset").hidden=false;$("routeButton").disabled=false;
+    $("datasetInfo").textContent+=(meta.downloaded_bytes===0?" Loaded from browser storage; 0 MB downloaded.":" Saved locally. Future visits reuse this download.");
+    map.attributionControl.addAttribution(meta.attribution);
+    L.rectangle(meta.bounds,{color:"#80977d",weight:1,dashArray:"6 5",fill:false,interactive:false}).addTo(boundsLayer);
+    connectivity();await drawNetwork();if(current!==selection)return;
+    const params=new URLSearchParams(location.search);
+    $("from").value=params.get("from")||(dataset==="gb"?"53.4808,-2.2426":"51.5010,-0.1416");
+    $("to").value=params.get("to")||(dataset==="gb"?"53.8008,-1.5491":"51.5055,-0.0754");
+    await route();
+  }catch(error){if(current===selection){status.textContent=error.message;status.className="load-status error";$("loadDataset").hidden=false;$("loadDataset").textContent="Retry / resume";$("downloadProgress").hidden=true;}}
+}
+$("dataset").onchange=()=>chooseDataset();
+$("loadDataset").onclick=()=>loadDataset();
+$("forgetDataset").onclick=async()=>{const dataset=$("dataset").value;selection++;sequence++;ready=false;client?.close();await RoadsStorage.remove(dataset,manifest);await chooseDataset(false);};
+// London stays small and starts automatically. The national first download is opt-in.
+try{const saved=localStorage.getItem("roads-db-dataset");if(["london","gb"].includes(saved))$("dataset").value=saved;}catch{}
+await storagePolicy();await chooseDataset();
