@@ -64,6 +64,27 @@ At national zoom levels the map displays a bounded sample of major roads; at
 street zoom it queries the visible area from the RDB tile index. Rendering is
 limited independently of routing: queries always use the full loaded graph.
 
+## Planner controls
+
+Use **Choose on map** beside A or B, then click the map. Ordinary map clicks do
+not replace either point. **Clear** starts a guided A-then-B selection. Escape or
+the selection prompt's close button cancels placement. Coordinates can also be
+edited directly, and pins can be dragged. Malformed and out-of-range coordinates
+are rejected before a routing query.
+
+The camera stays where you put it when points change, pins are dragged, points
+are swapped, examples are loaded or route results arrive. **Show route** (also
+available in the map toolbar) explicitly fits the route. **Show dataset area**
+fits the dataset coverage. The initial London view frames the example points;
+changing coverage establishes a new view unless you moved the map or edited
+points while its manifest was loading. Late results cannot replace newer routes.
+
+The phone layout keeps the map visible above a separately scrolling planner.
+Directions and the keyboard-accessible Local API tabs share the result area.
+Storage details are collapsed, large downloads can be paused/resumed, and removing
+saved data requires a confirmation in the interface. Each dataset retains its
+points during switches, including edits made before loading finishes.
+
 ## Browser API
 
 The active page exposes its selected client as `window.roadsDB` after loading:
@@ -116,7 +137,9 @@ Tests cover 20 London routes against Python, local/intercity national parity
 (including London to Edinburgh), partial and same-road snaps, disconnected
 components, reader validation, workspace reuse, source-ID mappings, binary tile
 search, viewport bounds, cache reuse without network, interrupted downloads,
-checksum failures, dataset isolation, eviction, removal and quota failure. Full
+checksum failures, dataset isolation, eviction, removal and quota failure. UI
+regressions cover stable cameras during point edits, delayed results, guided map
+selection, invalid coordinates and confirmed dataset removal. Full
 national parity runs in Pages CI after fetching the pinned data. Browser QA
 also checks switching and offline routes with the preview server stopped.
 

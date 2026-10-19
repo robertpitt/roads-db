@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Redesign the browser demo with a compact planner, clearer route summaries and
+  responsive map layout. Preserve the camera during all point and route edits;
+  provide explicit framing and point-picking controls. Add validation, loading
+  pause/resume, storage-removal confirmation, accessible tabs, per-dataset point
+  retention and regression tests for stale results and unintended camera moves.
+
 - Add selectable Great Britain coverage, a 399.09 MB compressed national data
   edition, resumable verified downloads, per-dataset browser caching, persistent
   storage requests and controls, bounded map rendering, national routing parity

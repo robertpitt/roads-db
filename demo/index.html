@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#163e38">
-  <meta name="description" content="Explore London or Great Britain with routing databases saved in your browser.">
-  <title>Roads, locally — roads-db</title>
+  <meta name="theme-color" content="#f8fafc">
+  <meta name="description" content="Explore London or Great Britain with private, on-device routing and offline road data.">
+  <title>Roads Explorer — roads-db</title>
   <link rel="stylesheet" href="vendor/leaflet.css">
   <link rel="stylesheet" href="style.css">
   <script src="vendor/leaflet.js" defer></script>
@@ -13,48 +13,73 @@
   <script src="app.js" type="module"></script>
 </head>
 <body>
-  <aside class="sidebar">
-    <header><a class="wordmark" href="https://github.com/robertpitt/roads-db"><span class="monogram">r</span> roads-db <span class="version">LAB / 01</span></a>
-      <p class="eyebrow">THE BROWSER IS THE SERVER</p><h1>Roads,<br><em>locally.</em></h1>
-      <p class="intro">A city or a country. Download once, explore locally. Directions calculated on your device.</p>
-    </header>
-    <section class="dataset-picker" aria-label="Dataset selection">
-      <label for="dataset">YOUR ROAD DATABASE</label>
-      <select id="dataset"><option value="london">Central London</option><option value="gb">Great Britain</option></select>
-      <p class="hint" id="datasetInfo">Checking saved data…</p>
-      <button type="button" id="loadDataset" class="primary" hidden>Download dataset</button>
-      <div class="storage-actions"><button id="forgetDataset" type="button" hidden>Remove saved dataset</button><span id="storagePolicy"></span></div>
-      <progress id="downloadProgress" max="1" value="0" hidden aria-label="Dataset loading progress"></progress>
-    </section>
-    <div id="loadStatus" class="load-status" role="status">Checking datasets…</div>
-    <p class="scope-note">Experimental graph paths · no one-way or turn restrictions</p>
-    <section class="planner" aria-label="Route planner">
-      <p class="section-label">01 / PICK YOUR JOURNEY</p>
-      <form id="routeForm">
-        <label class="coordinate"><span class="pin">A</span><span>From <input id="from" aria-label="Origin latitude, longitude" value="51.5010,-0.1416" required autocomplete="off"></span></label>
-        <label class="coordinate"><span class="pin destination">B</span><span>To <input id="to" aria-label="Destination latitude, longitude" value="51.5055,-0.0754" required autocomplete="off"></span></label>
-        <div class="actions"><button class="primary" id="routeButton" disabled>Find route <span>↗</span></button><button type="button" id="swapButton" class="secondary" aria-label="Swap origin and destination">⇅</button></div>
-      </form>
-      <p class="hint">Or click the map: first A, then B. Drag either marker to adjust.</p>
-      <div class="presets"><button id="exampleButton" type="button">Palace → Tower Bridge</button><button id="resetButton" type="button">Clear</button></div>
-    </section>
-    <section class="route-details" aria-label="Route results">
-      <div class="tabs"><button id="stepsTab" aria-pressed="true">Directions</button><button id="apiTab" aria-pressed="false">Local API</button></div>
-      <div id="stepsPanel"><p id="emptySteps" class="hint">Your route will appear here.</p><ol id="steps"></ol></div>
-      <div id="apiPanel" hidden><p class="hint">An async JavaScript API in this page. No routing request is sent to a server.</p><pre><code>await roadsDB.route({
+  <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+    <symbol id="i-route" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M6 7.5v7a4.5 4.5 0 0 0 4.5 4.5h5M18 16.5v-7A4.5 4.5 0 0 0 13.5 5h-5"/></symbol>
+    <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3"/></symbol>
+    <symbol id="i-swap" viewBox="0 0 24 24"><path d="M8 19V5m-4 4 4-4 4 4m4-4v14m-4-4 4 4 4-4"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5"/></symbol>
+    <symbol id="i-fit" viewBox="0 0 24 24"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/><path d="m8 16 8-8m-8 0h8v8"/></symbol>
+    <symbol id="i-map" viewBox="0 0 24 24"><path d="m3 5 6-2 6 2 6-2v16l-6 2-6-2-6 2V5Zm6-2v16m6-14v16"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 10 5-10 5L2 8l10-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="m7 6-6 6 6 6m10-12 6 6-6 6m-3-15-4 18"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 4 16 4 16 0V5M4 12c0 4 16 4 16 0"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M15 8V3H3v13h5"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-11v1"/></symbol>
+  </defs></svg>
+  <header class="app-header">
+    <a class="wordmark" href="https://github.com/robertpitt/roads-db" aria-label="roads-db on GitHub"><span class="brand-icon"><svg><use href="#i-route"/></svg></span>roads-db<span class="brand-divider"></span><span class="product-name">Explorer</span></a>
+    <div class="header-right"><span class="connection" id="connection"><span class="status-dot"></span><span id="connectionText">Preparing data</span></span><a class="source-link" href="https://github.com/robertpitt/roads-db"><svg class="icon"><use href="#i-code"/></svg><span>Source code</span></a></div>
+  </header>
+  <aside class="sidebar" aria-label="Route planner">
+    <div class="panel-heading"><div><p class="overline">LOCAL ROUTING</p><h1>Plan your route</h1></div><span class="privacy-label" title="Route calculations stay in your browser"><span class="status-dot"></span>On device</span></div>
+    <div class="panel-scroll">
+      <section class="dataset-picker" aria-label="Dataset selection">
+        <label class="field-label" for="dataset">Map coverage</label>
+        <div class="select-wrap"><svg class="icon"><use href="#i-map"/></svg><select id="dataset"><option value="london">Central London</option><option value="gb">Great Britain</option></select><svg class="icon select-chevron"><use href="#i-chevron"/></svg></div>
+        <p id="datasetInfo" class="dataset-info">Checking saved data…</p>
+        <div class="download-actions"><button type="button" id="loadDataset" class="button primary" hidden><svg class="icon"><use href="#i-download"/></svg><span id="downloadLabel">Download dataset</span></button><button type="button" id="cancelDownload" class="button secondary" hidden>Pause</button></div>
+        <progress id="downloadProgress" max="1" value="0" hidden aria-label="Dataset loading progress"></progress>
+        <p id="loadStatus" class="load-status" role="status">Checking datasets…</p>
+        <details class="storage-details"><summary>Data & offline storage<svg class="icon"><use href="#i-chevron"/></svg></summary><div class="storage-content"><p id="datasetFootprint"></p><p id="storagePolicy">Checking browser storage…</p><p>Saved data is reused on your next visit. Clearing site storage or browser eviction may require another download.</p><button id="forgetDataset" type="button" class="text-button danger" hidden>Remove saved dataset</button></div></details>
+      </section>
+      <section class="planner" aria-label="Journey endpoints">
+        <form id="routeForm" novalidate>
+          <div class="waypoints">
+            <div class="coordinate" id="fromField"><span class="pin">A</span><div class="coordinate-content"><label for="from">Starting point</label><input id="from" aria-label="Origin latitude, longitude" aria-describedby="pointHint" value="51.5010,-0.1416" placeholder="Latitude, longitude" autocomplete="off" spellcheck="false"><button id="pickFrom" type="button" class="pick-button" aria-pressed="false"><svg class="icon"><use href="#i-target"/></svg><span>Choose on map</span></button></div></div>
+            <button type="button" id="swapButton" class="icon-button swap-button" aria-label="Swap origin and destination" title="Swap points"><svg class="icon"><use href="#i-swap"/></svg></button>
+            <div class="coordinate" id="toField"><span class="pin destination">B</span><div class="coordinate-content"><label for="to">Destination</label><input id="to" aria-label="Destination latitude, longitude" aria-describedby="pointHint" value="51.5055,-0.0754" placeholder="Latitude, longitude" autocomplete="off" spellcheck="false"><button id="pickTo" type="button" class="pick-button" aria-pressed="false"><svg class="icon"><use href="#i-target"/></svg><span>Choose on map</span></button></div></div>
+          </div>
+          <p id="pointHint" class="hint">Choose points on the map, or enter coordinates. Drag a pin to refine.</p>
+          <p id="routeError" class="inline-error" role="alert" hidden></p>
+          <div class="planner-actions"><button class="button primary" id="routeButton" disabled><svg class="icon route-button-icon"><use href="#i-route"/></svg><span id="routeButtonLabel">Find route</span><svg class="icon arrow-icon"><use href="#i-arrow"/></svg></button><button id="resetButton" class="button secondary" type="button" title="Clear both points">Clear</button></div>
+        </form>
+        <button id="exampleButton" class="example-button" type="button"><span>Try an example</span><span id="exampleLabel">Palace → Tower Bridge</span><svg class="icon"><use href="#i-arrow"/></svg></button>
+      </section>
+      <section class="route-details" aria-label="Route results">
+        <div class="route-summary" id="routeSummary" hidden><div><p class="field-label">Total distance</p><strong id="distance">—</strong><p class="query-time"><svg class="icon"><use href="#i-clock"/></svg><span id="timing">—</span><span>on your device</span></p></div><button id="showRoute" class="button secondary" type="button"><svg class="icon"><use href="#i-fit"/></svg>Show route</button></div>
+        <div class="tabs" role="tablist" aria-label="Route details"><button id="stepsTab" role="tab" aria-selected="true" aria-controls="stepsPanel" tabindex="0">Directions</button><button id="apiTab" role="tab" aria-selected="false" aria-controls="apiPanel" tabindex="-1"><svg class="icon"><use href="#i-code"/></svg>Local API</button></div>
+        <div id="stepsPanel" role="tabpanel" aria-labelledby="stepsTab"><div id="emptySteps" class="empty-state"><svg class="icon"><use href="#i-route"/></svg><strong id="emptyTitle">A route starts with two points</strong><p id="emptyDescription">Set a start and destination to see your directions here.</p></div><ol id="steps"></ol></div>
+        <div id="apiPanel" role="tabpanel" aria-labelledby="apiTab" hidden><p class="hint">An async API running in this browser. Your route is never sent to a server.</p><pre><code id="apiExample">await roadsDB.route({
   from: [51.5010, -0.1416],
   to: [51.5055, -0.0754]
-})</code></pre><button id="copyButton" class="secondary" type="button">Copy response</button><pre id="apiResult">Choose a route to inspect its response.</pre></div>
-    </section>
-    <footer><p><strong>Experimental distance routing.</strong> One-way streets, access rules and turn restrictions are not modelled. Directions are approximate.</p>
-      <a id="dataNotice" href="data/NOTICE.txt">Data & attribution</a><span> / </span><a href="https://github.com/robertpitt/roads-db">Source on GitHub ↗</a></footer>
+})</code></pre><div class="api-toolbar"><span><strong id="edgeCount">—</strong> graph edges</span><button id="copyButton" class="text-button" type="button" disabled><svg class="icon"><use href="#i-copy"/></svg><span id="copyLabel">Copy JSON</span></button></div><pre id="apiResult">Choose a route to inspect its response.</pre></div>
+      </section>
+      <div class="route-caveat"><svg class="icon"><use href="#i-info"/></svg><p>Experimental distance routes. One-way streets, access rules and turn restrictions are not included.</p></div>
+      <footer><a id="dataNotice" href="data/NOTICE.txt">Data & attribution</a><span>·</span><span>No routing server. No API key.</span></footer>
+    </div>
   </aside>
-  <main class="map-wrap">
+  <main class="map-wrap" aria-label="Route map">
     <div id="map" aria-label="Interactive local road map"></div>
-    <div class="map-caption"><span class="live-dot"></span> <span id="datasetCaption">CENTRAL LONDON</span> <span class="caption-rule"></span><span id="networkStats">RDB + SQLite</span></div>
-    <div class="metrics" aria-live="polite"><div><span>Distance</span><strong id="distance">—</strong></div><div><span>Local query</span><strong id="timing">—</strong></div><div><span>Graph edges</span><strong id="edgeCount">—</strong></div></div>
-    <label class="tile-toggle"><input type="checkbox" id="tiles"> Street-map labels <small>(online)</small></label>
-    <div class="map-note" id="mapNote">Click the map to set A</div>
+    <div class="map-topbar"><div class="coverage-badge"><svg class="icon"><use href="#i-map"/></svg><div><strong id="datasetCaption">Central London</strong><span id="networkStats">Local road network</span></div></div><div class="map-tools"><label class="tile-toggle" title="Street-map tiles need internet; routes stay local"><input type="checkbox" id="tiles"><svg class="icon"><use href="#i-layers"/></svg><span>Street labels</span><small>Online</small></label><button id="viewCoverage" class="icon-button" type="button" aria-label="Show dataset area" title="Show dataset area" disabled><svg class="icon"><use href="#i-map"/></svg></button><button id="fitRoute" class="icon-button" type="button" aria-label="Fit route to map" title="Fit route to map" disabled><svg class="icon"><use href="#i-fit"/></svg></button></div></div>
+    <div class="map-prompt" id="mapPrompt" hidden><svg class="icon"><use href="#i-target"/></svg><span id="mapNote">Click to place your start</span><button id="cancelPick" class="icon-button" type="button" aria-label="Cancel map selection"><svg class="icon"><use href="#i-close"/></svg></button></div>
+    <div class="map-legend"><span class="legend-road"></span>Road network<span class="legend-route"></span>Your route</div>
   </main>
+  <p id="routeAnnouncement" class="sr-only" role="status"></p>
+  <dialog id="removeDialog"><form method="dialog"><span class="dialog-icon"><svg class="icon"><use href="#i-database"/></svg></span><h2>Remove saved data?</h2><p id="removeDescription">You will need to download this dataset again to use it.</p><div class="dialog-actions"><button class="button secondary" value="cancel" autofocus>Keep data</button><button class="button destructive" id="confirmRemove" value="remove">Remove dataset</button></div></form></dialog>
 </body>
 </html>
